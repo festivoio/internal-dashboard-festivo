@@ -564,10 +564,17 @@ html, body {
   transform: translateY(-1px);
 }
 
+.action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .action-buttons {
   display: flex;
+  flex-direction: column;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  align-items: flex-start;
 }
 
 .approve-btn {
@@ -586,6 +593,15 @@ html, body {
 
 .paid-btn:hover {
   background: #535bf2;
+}
+
+.copy-transfer-btn {
+  background: #0f766e;
+  color: white;
+}
+
+.copy-transfer-btn:hover {
+  background: #115e59;
 }
 
 /* Payouts Specific Styles */
@@ -633,6 +649,28 @@ html, body {
 
 .payouts-table tr:last-child td {
   border-bottom: none;
+}
+
+.transfer-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 220px;
+}
+
+.transfer-line {
+  line-height: 1.2;
+  color: #111827;
+  word-break: break-word;
+}
+
+.transfer-label {
+  font-weight: 600;
+}
+
+.transfer-unavailable {
+  color: #6b7280;
+  font-style: italic;
 }
 
 .no-payouts {

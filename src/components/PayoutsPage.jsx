@@ -1,6 +1,38 @@
 import { useState, useEffect } from 'react'
 import Navigation from './Navigation'
 
+/**
+ * @typedef {Object} PrimaryBank
+ * @property {string=} id
+ * @property {string=} type
+ * @property {string=} bankName
+ * @property {string=} accountName
+ * @property {string=} accountNumber
+ * @property {string=} routingNumber
+ * @property {string=} branch
+ * @property {string=} provider
+ * @property {string=} walletNumber
+ * @property {string=} country
+ * @property {string=} currency
+ * @property {string=} status
+ * @property {boolean=} isPrimary
+ * @property {Record<string, unknown>=} meta
+ */
+
+/**
+ * @typedef {Object} AdminPayoutRow
+ * @property {string=} id
+ * @property {string=} eventName
+ * @property {string=} organizationName
+ * @property {string=} status
+ * @property {number=} amountNet
+ * @property {string=} currency
+ * @property {string=} createdAt
+ * @property {string=} approvedAt
+ * @property {string=} paidAt
+ * @property {PrimaryBank | null=} primaryBank
+ */
+
 function PayoutsPage() {
   const [payouts, setPayouts] = useState([])
   const [filteredPayouts, setFilteredPayouts] = useState([])
@@ -207,7 +239,137 @@ function PayoutsPage() {
   )
 }
 
+const PRIMARY_BANK_FIELD_LABELS = {
+  id: 'Bank ID',
+  type: 'Type',
+  bankName: 'Bank Name',
+  accountName: 'Account Name',
+  accountNumber: 'Account Number',
+  routingNumber: 'Routing Number',
+  branch: 'Branch',
+  provider: 'Provider',
+  walletNumber: 'Wallet Number',
+  country: 'Country',
+  currency: 'Currency',
+  status: 'Status',
+  isPrimary: 'Is Primary',
+  meta: 'Meta'
+}
+
+const hasValue = (value) => value !== null && value !== undefined && value !== ''
+
+const safeText = (value) => (hasValue(value) ? String(value) : null)
+
+const getTransferDisplayFields = (primaryBank) => {
+  if (!primaryBank) return []
+
+  const baseFields = primaryBank.type === 'BANK'
+    ? [
+        ['Bank Name', primaryBank.bankName],
+        ['Account Name', primaryBank.accountName],
+        ['Account Number', primaryBank.accountNumber],
+        ['Routing Number', primaryBank.routingNumber],
+        ['Branch', primaryBank.branch]
+      ]
+    : [
+        ['Provider', primaryBank.provider],
+        ['Wallet Number', primaryBank.walletNumber],
+        ['Account Name', primaryBank.accountName]
+      ]
+
+  baseFields.push(['Country', primaryBank.country], ['Currency', primaryBank.currency])
+
+  return baseFields.filter(([, value]) => hasValue(value))
+}
+
+const buildTransferDetailsText = (payout) => {
+  const amountValue = hasValue(payout?.amountNet) ? payout.amountNet : '-'
+  const amountCurrency = safeText(payout?.currency) || ''
+  const amountText = `${amountValue}${amountCurrency ? ` ${amountCurrency}` : ''}`
+
+  const lines = [
+    `Organization: ${safeText(payout?.organizationName) || '-'}`,
+    `Payout ID: ${safeText(payout?.id) || '-'}`,
+    `Amount: ${amountText}`
+  ]
+
+  if (!payout?.primaryBank) {
+    lines.push('Bank info: unavailable')
+    return lines.join('\n')
+  }
+
+  const primaryBank = payout.primaryBank
+  const fieldOrder = [
+    'type',
+    'bankName',
+    'accountName',
+    'accountNumber',
+    'routingNumber',
+    'branch',
+    'provider',
+    'walletNumber',
+    'country',
+    'currency',
+    'status',
+    'isPrimary',
+    'id',
+    'meta'
+  ]
+
+  fieldOrder.forEach((key) => {
+    const value = primaryBank[key]
+    if (!hasValue(value)) return
+
+    if (key === 'meta' && typeof value === 'object') {
+      lines.push(`${PRIMARY_BANK_FIELD_LABELS[key]}: ${JSON.stringify(value)}`)
+      return
+    }
+
+    lines.push(`${PRIMARY_BANK_FIELD_LABELS[key]}: ${String(value)}`)
+  })
+
+  return lines.join('\n')
+}
+
+async function copyToClipboard(text) {
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+
+  const textArea = document.createElement('textarea')
+  textArea.value = text
+  textArea.setAttribute('readonly', '')
+  textArea.style.position = 'absolute'
+  textArea.style.left = '-9999px'
+  document.body.appendChild(textArea)
+  textArea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textArea)
+}
+
 function PayoutsList({ payouts, onApprove, onMarkPaid, formatCurrency, getStatusColor }) {
+  const [copyingPayoutId, setCopyingPayoutId] = useState(null)
+  const [copiedPayoutId, setCopiedPayoutId] = useState(null)
+
+  const handleCopyTransferDetails = async (payout) => {
+    if (!payout?.primaryBank) return
+
+    try {
+      setCopyingPayoutId(payout.id)
+      await copyToClipboard(buildTransferDetailsText(payout))
+      setCopiedPayoutId(payout.id)
+
+      setTimeout(() => {
+        setCopiedPayoutId((currentId) => (currentId === payout.id ? null : currentId))
+      }, 1500)
+    } catch (error) {
+      console.error('Failed to copy transfer details', error)
+    } finally {
+      setCopyingPayoutId(null)
+    }
+  }
+
   if (!payouts.length) {
     return (
       <div className="no-payouts">
@@ -233,6 +395,7 @@ function PayoutsList({ payouts, onApprove, onMarkPaid, formatCurrency, getStatus
               <th>Created</th>
               <th>Approved</th>
               <th>Paid</th>
+              <th>Transfer Info</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -251,7 +414,33 @@ function PayoutsList({ payouts, onApprove, onMarkPaid, formatCurrency, getStatus
                 <td>{payout.approvedAt ? new Date(payout.approvedAt).toLocaleDateString() : '-'}</td>
                 <td>{payout.paidAt ? new Date(payout.paidAt).toLocaleDateString() : '-'}</td>
                 <td>
+                  {!payout.primaryBank ? (
+                    <span className="transfer-unavailable">Bank info unavailable</span>
+                  ) : (
+                    <div className="transfer-info">
+                      {getTransferDisplayFields(payout.primaryBank).map(([label, value]) => (
+                        <div className="transfer-line" key={`${payout.id}-${label}`}>
+                          <span className="transfer-label">{label}:</span> {value}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </td>
+                <td>
                   <div className="action-buttons">
+                    <button
+                      onClick={() => handleCopyTransferDetails(payout)}
+                      className="action-btn copy-transfer-btn"
+                      disabled={!payout.primaryBank || copyingPayoutId === payout.id}
+                    >
+                      {!payout.primaryBank
+                        ? 'Copy Unavailable'
+                        : copiedPayoutId === payout.id
+                          ? 'Copied'
+                          : copyingPayoutId === payout.id
+                            ? 'Copying...'
+                            : 'Copy transfer details'}
+                    </button>
                     {payout.status === 'REQUESTED' && (
                       <button
                         onClick={() => onApprove(payout.id)}

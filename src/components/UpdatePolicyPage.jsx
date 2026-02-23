@@ -30,6 +30,24 @@ function UpdatePolicyPage() {
     password: '213nbu340eseAS&^$Usds^%h9'
   }
 
+  const getAuthHeaders = () => {
+    const token =
+      localStorage.getItem('token') ||
+      localStorage.getItem('authToken') ||
+      localStorage.getItem('accessToken') ||
+      localStorage.getItem('adminToken')
+
+    if (!token) {
+      return { 'Content-Type': 'application/json' }
+    }
+
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'x-auth-token': token
+    }
+  }
+
   useEffect(() => {
     if (id) {
       loadPolicy()
@@ -43,7 +61,7 @@ function UpdatePolicyPage() {
 
       const response = await fetch(`${API_URL}/api/fees/policies`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(ADMIN_CREDENTIALS)
       })
 
@@ -146,7 +164,7 @@ function UpdatePolicyPage() {
 
       const response = await fetch(`${API_URL}/api/fees/policies/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(payload)
       })
 
