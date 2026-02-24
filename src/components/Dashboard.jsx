@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react'
 import Navigation from './Navigation'
 import EventsCharts from './EventsCharts'
+import { apiRequest } from '../lib/apiClient'
 
 function Dashboard() {
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-
-  const API_URL = import.meta.env.VITE_API_URL || 'https://test-api.festivo.io'
 
   useEffect(() => {
     fetchEvents()
@@ -16,13 +15,7 @@ function Dashboard() {
   const fetchEvents = async () => {
     try {
       setLoading(true)
-      const response = await fetch(`${API_URL}/api/events`)
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch events')
-      }
-      
-      const data = await response.json()
+      const data = await apiRequest('/api/events', { method: 'GET' })
       setEvents(data.data.events)
       setError('')
     } catch (err) {

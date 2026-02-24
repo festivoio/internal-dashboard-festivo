@@ -1,332 +1,75 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Navigation from './Navigation'
+import { apiRequest } from '../lib/apiClient'
+import MoneySummaryCard from './MoneySummaryCard'
+import PayoutRow from './PayoutRow'
+import './PayoutsPage.css'
 
-/**
- * @typedef {Object} PrimaryBank
- * @property {string=} id
- * @property {string=} type
- * @property {string=} bankName
- * @property {string=} accountName
- * @property {string=} accountNumber
- * @property {string=} routingNumber
- * @property {string=} branch
- * @property {string=} provider
- * @property {string=} walletNumber
- * @property {string=} country
- * @property {string=} currency
- * @property {string=} status
- * @property {boolean=} isPrimary
- * @property {Record<string, unknown>=} meta
- */
+const PAGE_SIZE = 10
 
-/**
- * @typedef {Object} AdminPayoutRow
- * @property {string=} id
- * @property {string=} eventName
- * @property {string=} organizationName
- * @property {string=} status
- * @property {number=} amountNet
- * @property {string=} currency
- * @property {string=} createdAt
- * @property {string=} approvedAt
- * @property {string=} paidAt
- * @property {PrimaryBank | null=} primaryBank
- */
+const SEGMENTS = [
+  { key: 'all', label: 'All' },
+  { key: 'requested', label: 'Requested' },
+  { key: 'approved', label: 'Approved' },
+  { key: 'paid', label: 'Paid' },
+  { key: 'rejected', label: 'Rejected' }
+]
 
-function PayoutsPage() {
-  const [payouts, setPayouts] = useState([])
-  const [filteredPayouts, setFilteredPayouts] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
+const SORTABLE_FIELDS = {
+  amount: 'amount',
+  requestedDate: 'requestedDate',
+  status: 'status'
+}
 
-  const API_URL = import.meta.env.VITE_API_URL || 'https://test-api.festivo.io'
+function hasValue(value) {
+  return value !== null && value !== undefined && value !== ''
+}
 
-  // Admin credentials
-  const ADMIN_CREDENTIALS = {
-    username: 'rique',
-    password: '213nbu340eseAS&^$Usds^%h9'
-  }
+function moneyValue(amount) {
+  if (!hasValue(amount)) return 0
+  const parsed = Number(amount)
+  return Number.isFinite(parsed) ? parsed : 0
+}
 
-  useEffect(() => {
-    fetchPayouts()
-    // fetchSummary() // Remove if summary endpoint not available
-  }, [])
+function formatMoney(amount, currency = 'BDT') {
+  const safeAmount = moneyValue(amount)
+  const normalizedCurrency = currency || 'BDT'
 
-  useEffect(() => {
-    filterPayouts()
-  }, [payouts, statusFilter])
-
-  const filterPayouts = () => {
-    if (statusFilter === 'all') {
-      setFilteredPayouts(payouts)
-    } else if (statusFilter === 'pending') {
-      setFilteredPayouts(payouts.filter(p =>
-        p.status === 'REQUESTED' || p.status === 'APPROVED' || p.status === 'PROCESSING'
-      ))
-    } else if (statusFilter === 'paid') {
-      setFilteredPayouts(payouts.filter(p => p.status === 'PAID'))
-    } else if (statusFilter === 'requested') {
-      setFilteredPayouts(payouts.filter(p => p.status === 'REQUESTED'))
-    } else if (statusFilter === 'approved') {
-      setFilteredPayouts(payouts.filter(p => p.status === 'APPROVED'))
-    }
-  }
-
-  const fetchPayouts = async () => {
-    try {
-      setLoading(true)
-      const response = await fetch(`${API_URL}/api/admin/payouts`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(ADMIN_CREDENTIALS)
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch payouts: ${response.statusText}`)
-      }
-
-      const data = await response.json()
-      if (data.success) {
-        setPayouts(data.data.rows || [])
-      } else {
-        setPayouts([])
-      }
-      setError('')
-    } catch (err) {
-      setError('Error loading payouts: ' + err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-
-  const handleApprove = async (payoutId) => {
-    try {
-      const response = await fetch(`${API_URL}/api/admin/payouts/${payoutId}/approve`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(ADMIN_CREDENTIALS)
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to approve payout')
-      }
-
-      // Refresh payouts after approval
-      fetchPayouts()
-    } catch (err) {
-      setError('Error approving payout: ' + err.message)
-    }
-  }
-
-  const handleMarkPaid = async (payoutId) => {
-    try {
-      const response = await fetch(`${API_URL}/api/admin/payouts/${payoutId}/mark-paid`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(ADMIN_CREDENTIALS)
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to mark payout as paid')
-      }
-
-      // Refresh payouts after marking as paid
-      fetchPayouts()
-    } catch (err) {
-      setError('Error marking payout as paid: ' + err.message)
-    }
-  }
-
-  const formatCurrency = (amount, currency = 'USD') => {
-    return new Intl.NumberFormat('en-US', {
+  if (normalizedCurrency.toUpperCase() === 'BDT') {
+    return new Intl.NumberFormat('en-BD', {
       style: 'currency',
-      currency: currency,
-    }).format(amount)
+      currency: 'BDT',
+      maximumFractionDigits: 2
+    }).format(safeAmount)
   }
 
-  const getStatusColor = (status) => {
-    switch (status?.toUpperCase()) {
-      case 'REQUESTED':
-        return 'status-draft'
-      case 'APPROVED':
-        return 'status-published'
-      case 'PROCESSING':
-        return 'status-processing'
-      case 'PAID':
-        return 'status-completed'
-      case 'REJECTED':
-        return 'status-cancelled'
-      default:
-        return 'status-default'
-    }
-  }
-
-  return (
-    <div className="payouts-page">
-      <Navigation />
-      
-      <main className="payouts-content">
-        <div className="container">
-          <h1>Payouts Management</h1>
-          <p>Manage event payouts and withdrawals.</p>
-
-          {!loading && !error && (
-            <div className="search-filter-container">
-              <div className="filter-buttons">
-                <button
-                  className={`filter-btn ${statusFilter === 'all' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('all')}
-                >
-                  All ({payouts.length})
-                </button>
-                <button
-                  className={`filter-btn ${statusFilter === 'pending' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('pending')}
-                >
-                  Pending ({payouts.filter(p => p.status === 'REQUESTED' || p.status === 'APPROVED' || p.status === 'PROCESSING').length})
-                </button>
-                <button
-                  className={`filter-btn ${statusFilter === 'requested' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('requested')}
-                >
-                  Requested ({payouts.filter(p => p.status === 'REQUESTED').length})
-                </button>
-                <button
-                  className={`filter-btn ${statusFilter === 'approved' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('approved')}
-                >
-                  Approved ({payouts.filter(p => p.status === 'APPROVED').length})
-                </button>
-                <button
-                  className={`filter-btn ${statusFilter === 'paid' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('paid')}
-                >
-                  Paid ({payouts.filter(p => p.status === 'PAID').length})
-                </button>
-              </div>
-            </div>
-          )}
-
-          {loading ? (
-            <div className="loading">Loading payouts...</div>
-          ) : error ? (
-            <div className="error">
-              {error}
-              <button onClick={fetchPayouts} className="retry-btn">
-                Retry
-              </button>
-            </div>
-          ) : (
-            <PayoutsList
-              payouts={filteredPayouts}
-              onApprove={handleApprove}
-              onMarkPaid={handleMarkPaid}
-              formatCurrency={formatCurrency}
-              getStatusColor={getStatusColor}
-            />
-          )}
-        </div>
-      </main>
-    </div>
-  )
+  return `${new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2
+  }).format(safeAmount)} ${normalizedCurrency}`
 }
 
-const PRIMARY_BANK_FIELD_LABELS = {
-  id: 'Bank ID',
-  type: 'Type',
-  bankName: 'Bank Name',
-  accountName: 'Account Name',
-  accountNumber: 'Account Number',
-  routingNumber: 'Routing Number',
-  branch: 'Branch',
-  provider: 'Provider',
-  walletNumber: 'Wallet Number',
-  country: 'Country',
-  currency: 'Currency',
-  status: 'Status',
-  isPrimary: 'Is Primary',
-  meta: 'Meta'
-}
-
-const hasValue = (value) => value !== null && value !== undefined && value !== ''
-
-const safeText = (value) => (hasValue(value) ? String(value) : null)
-
-const getTransferDisplayFields = (primaryBank) => {
-  if (!primaryBank) return []
-
-  const baseFields = primaryBank.type === 'BANK'
-    ? [
-        ['Bank Name', primaryBank.bankName],
-        ['Account Name', primaryBank.accountName],
-        ['Account Number', primaryBank.accountNumber],
-        ['Routing Number', primaryBank.routingNumber],
-        ['Branch', primaryBank.branch]
-      ]
-    : [
-        ['Provider', primaryBank.provider],
-        ['Wallet Number', primaryBank.walletNumber],
-        ['Account Name', primaryBank.accountName]
-      ]
-
-  baseFields.push(['Country', primaryBank.country], ['Currency', primaryBank.currency])
-
-  return baseFields.filter(([, value]) => hasValue(value))
-}
-
-const buildTransferDetailsText = (payout) => {
-  const amountValue = hasValue(payout?.amountNet) ? payout.amountNet : '-'
-  const amountCurrency = safeText(payout?.currency) || ''
-  const amountText = `${amountValue}${amountCurrency ? ` ${amountCurrency}` : ''}`
-
+function buildTransferDetailsText(payout) {
   const lines = [
-    `Organization: ${safeText(payout?.organizationName) || '-'}`,
-    `Payout ID: ${safeText(payout?.id) || '-'}`,
-    `Amount: ${amountText}`
+    `Payout ID: ${payout?.id || '-'}`,
+    `Event: ${payout?.eventName || '-'}`,
+    `Organizer: ${payout?.organizationName || '-'}`,
+    `Amount: ${formatMoney(payout?.amountNet, payout?.currency)}`
   ]
 
-  if (!payout?.primaryBank) {
-    lines.push('Bank info: unavailable')
+  const primaryBank = payout?.primaryBank
+  if (!primaryBank) {
+    lines.push('Transfer details: unavailable')
     return lines.join('\n')
   }
 
-  const primaryBank = payout.primaryBank
-  const fieldOrder = [
-    'type',
-    'bankName',
-    'accountName',
-    'accountNumber',
-    'routingNumber',
-    'branch',
-    'provider',
-    'walletNumber',
-    'country',
-    'currency',
-    'status',
-    'isPrimary',
-    'id',
-    'meta'
-  ]
-
-  fieldOrder.forEach((key) => {
-    const value = primaryBank[key]
-    if (!hasValue(value)) return
-
-    if (key === 'meta' && typeof value === 'object') {
-      lines.push(`${PRIMARY_BANK_FIELD_LABELS[key]}: ${JSON.stringify(value)}`)
-      return
-    }
-
-    lines.push(`${PRIMARY_BANK_FIELD_LABELS[key]}: ${String(value)}`)
-  })
+  const provider = primaryBank.type === 'BANK' ? primaryBank.bankName : primaryBank.provider
+  lines.push(`Bank / Provider: ${provider || '-'}`)
+  lines.push(`Account Name: ${primaryBank.accountName || '-'}`)
+  lines.push(`Account Number: ${primaryBank.accountNumber || primaryBank.walletNumber || '-'}`)
+  lines.push(`Branch: ${primaryBank.branch || '-'}`)
+  lines.push(`Country: ${primaryBank.country || '-'}`)
+  lines.push(`Currency: ${primaryBank.currency || payout?.currency || '-'}`)
 
   return lines.join('\n')
 }
@@ -348,122 +91,369 @@ async function copyToClipboard(text) {
   document.body.removeChild(textArea)
 }
 
-function PayoutsList({ payouts, onApprove, onMarkPaid, formatCurrency, getStatusColor }) {
-  const [copyingPayoutId, setCopyingPayoutId] = useState(null)
-  const [copiedPayoutId, setCopiedPayoutId] = useState(null)
+function getStatusCounts(rows) {
+  return {
+    all: rows.length,
+    requested: rows.filter((row) => (row.status || '').toUpperCase() === 'REQUESTED').length,
+    approved: rows.filter((row) => ['APPROVED', 'PROCESSING'].includes((row.status || '').toUpperCase())).length,
+    paid: rows.filter((row) => (row.status || '').toUpperCase() === 'PAID').length,
+    rejected: rows.filter((row) => (row.status || '').toUpperCase() === 'REJECTED').length
+  }
+}
 
-  const handleCopyTransferDetails = async (payout) => {
-    if (!payout?.primaryBank) return
+function payoutMatchesFilter(payout, statusFilter) {
+  const status = (payout.status || '').toUpperCase()
 
+  if (statusFilter === 'requested') return status === 'REQUESTED'
+  if (statusFilter === 'approved') return status === 'APPROVED' || status === 'PROCESSING'
+  if (statusFilter === 'paid') return status === 'PAID'
+  if (statusFilter === 'rejected') return status === 'REJECTED'
+
+  return true
+}
+
+function sortPayouts(rows, sortConfig) {
+  const sorted = [...rows]
+
+  sorted.sort((a, b) => {
+    let comparison = 0
+
+    if (sortConfig.field === SORTABLE_FIELDS.amount) {
+      comparison = moneyValue(a.amountNet) - moneyValue(b.amountNet)
+    }
+
+    if (sortConfig.field === SORTABLE_FIELDS.requestedDate) {
+      comparison = new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+    }
+
+    if (sortConfig.field === SORTABLE_FIELDS.status) {
+      comparison = (a.status || '').localeCompare(b.status || '')
+    }
+
+    return sortConfig.direction === 'asc' ? comparison : comparison * -1
+  })
+
+  return sorted
+}
+
+function buildSummaryCards(rows) {
+  const now = new Date()
+  const currentMonth = now.getMonth()
+  const currentYear = now.getFullYear()
+
+  const totalRequestedAmount = rows.reduce((total, row) => total + moneyValue(row.amountNet), 0)
+  const pendingApprovalRows = rows.filter((row) => (row.status || '').toUpperCase() === 'REQUESTED')
+  const approvedNotPaidRows = rows.filter((row) => ['APPROVED', 'PROCESSING'].includes((row.status || '').toUpperCase()))
+  const paidThisMonthRows = rows.filter((row) => {
+    const paidAt = row.paidAt ? new Date(row.paidAt) : null
+    if (!paidAt || Number.isNaN(paidAt.getTime())) return false
+
+    return paidAt.getMonth() === currentMonth && paidAt.getFullYear() === currentYear
+  })
+
+  return [
+    {
+      key: 'requested',
+      label: 'Total Requested Amount',
+      amount: formatMoney(totalRequestedAmount, 'BDT'),
+      trend: `${rows.length} payouts`
+    },
+    {
+      key: 'pendingApproval',
+      label: 'Pending Approval',
+      amount: formatMoney(
+        pendingApprovalRows.reduce((total, row) => total + moneyValue(row.amountNet), 0),
+        'BDT'
+      ),
+      trend: `${pendingApprovalRows.length} awaiting review`
+    },
+    {
+      key: 'approved',
+      label: 'Approved (Not Paid)',
+      amount: formatMoney(
+        approvedNotPaidRows.reduce((total, row) => total + moneyValue(row.amountNet), 0),
+        'BDT'
+      ),
+      trend: `${approvedNotPaidRows.length} ready for settlement`
+    },
+    {
+      key: 'paidThisMonth',
+      label: 'Paid This Month',
+      amount: formatMoney(
+        paidThisMonthRows.reduce((total, row) => total + moneyValue(row.amountNet), 0),
+        'BDT'
+      ),
+      trend: `${paidThisMonthRows.length} payouts closed`
+    }
+  ]
+}
+
+function PayoutsPage() {
+  const [payouts, setPayouts] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [sortConfig, setSortConfig] = useState({
+    field: SORTABLE_FIELDS.requestedDate,
+    direction: 'desc'
+  })
+  const [currentPage, setCurrentPage] = useState(1)
+  const [expandedRows, setExpandedRows] = useState({})
+
+  useEffect(() => {
+    fetchPayouts()
+  }, [])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [statusFilter, sortConfig.field, sortConfig.direction])
+
+  const fetchPayouts = async () => {
     try {
-      setCopyingPayoutId(payout.id)
-      await copyToClipboard(buildTransferDetailsText(payout))
-      setCopiedPayoutId(payout.id)
+      setLoading(true)
+      const data = await apiRequest('/api/admin/payouts', {
+        method: 'POST',
+        body: {}
+      })
 
-      setTimeout(() => {
-        setCopiedPayoutId((currentId) => (currentId === payout.id ? null : currentId))
-      }, 1500)
-    } catch (error) {
-      console.error('Failed to copy transfer details', error)
+      if (data.success) {
+        setPayouts(data?.data?.rows || [])
+      } else {
+        setPayouts([])
+      }
+      setError('')
+    } catch (err) {
+      setError('Error loading payouts: ' + err.message)
     } finally {
-      setCopyingPayoutId(null)
+      setLoading(false)
     }
   }
 
-  if (!payouts.length) {
-    return (
-      <div className="no-payouts">
-        <p>No payouts found.</p>
-      </div>
-    )
+  const statusCounts = useMemo(() => getStatusCounts(payouts), [payouts])
+  const summaryCards = useMemo(() => buildSummaryCards(payouts), [payouts])
+
+  const filteredAndSorted = useMemo(() => {
+    const filtered = payouts.filter((payout) => payoutMatchesFilter(payout, statusFilter))
+    return sortPayouts(filtered, sortConfig)
+  }, [payouts, statusFilter, sortConfig])
+
+  const totalItems = filteredAndSorted.length
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE))
+  const startIndex = (currentPage - 1) * PAGE_SIZE
+  const endIndex = startIndex + PAGE_SIZE
+  const visibleRows = filteredAndSorted.slice(startIndex, endIndex)
+  const rangeStart = totalItems === 0 ? 0 : startIndex + 1
+  const rangeEnd = Math.min(endIndex, totalItems)
+
+  const pages = useMemo(() => {
+    const values = []
+    const from = Math.max(1, currentPage - 1)
+    const to = Math.min(totalPages, currentPage + 1)
+
+    for (let page = from; page <= to; page += 1) {
+      values.push(page)
+    }
+
+    if (!values.includes(1)) values.unshift(1)
+    if (!values.includes(totalPages)) values.push(totalPages)
+
+    return Array.from(new Set(values))
+  }, [currentPage, totalPages])
+
+  const toggleExpand = (payoutId) => {
+    setExpandedRows((prev) => ({
+      ...prev,
+      [payoutId]: !prev[payoutId]
+    }))
+  }
+
+  const requestSort = (field) => {
+    setSortConfig((prev) => {
+      if (prev.field !== field) {
+        return { field, direction: 'asc' }
+      }
+
+      return { field, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+    })
+  }
+
+  const openEvent = (payout) => {
+    const eventId = payout?.eventId || payout?.event?.id
+    if (!eventId) return
+
+    window.open(`https://festivo.io/events/${eventId}`, '_blank', 'noopener,noreferrer')
+  }
+
+  const runPayoutAction = async (action, payout) => {
+    try {
+      if (action === 'copyDetails') {
+        await copyToClipboard(buildTransferDetailsText(payout))
+        return
+      }
+
+      if (action === 'viewEvent') {
+        openEvent(payout)
+        return
+      }
+
+      if (action === 'approve') {
+        await apiRequest(`/api/admin/payouts/${payout.id}/approve`, {
+          method: 'POST',
+          body: {}
+        })
+      }
+
+      if (action === 'reject') {
+        await apiRequest(`/api/admin/payouts/${payout.id}/reject`, {
+          method: 'POST',
+          body: {}
+        })
+      }
+
+      if (action === 'markPaid') {
+        await apiRequest(`/api/admin/payouts/${payout.id}/mark-paid`, {
+          method: 'POST',
+          body: {}
+        })
+      }
+
+      if (['approve', 'reject', 'markPaid'].includes(action)) {
+        await fetchPayouts()
+      }
+    } catch (actionError) {
+      setError(`Error while performing action: ${actionError.message}`)
+    }
   }
 
   return (
-    <div className="payouts-list">
-      <div className="payouts-header">
-        <h2>Payouts ({payouts.length})</h2>
-      </div>
+    <div className="payouts-page">
+      <Navigation />
 
-      <div className="table-container">
-        <table className="payouts-table">
-          <thead>
-            <tr>
-              <th>Event</th>
-              <th>Organization</th>
-              <th>Status</th>
-              <th>Amount</th>
-              <th>Created</th>
-              <th>Approved</th>
-              <th>Paid</th>
-              <th>Transfer Info</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {payouts.map((payout) => (
-              <tr key={payout.id}>
-                <td className="event-name">{payout.eventName}</td>
-                <td>{payout.organizationName}</td>
-                <td>
-                  <span className={`status-badge ${getStatusColor(payout.status)}`}>
-                    {payout.status}
-                  </span>
-                </td>
-                <td>{formatCurrency(payout.amountNet, payout.currency)}</td>
-                <td>{new Date(payout.createdAt).toLocaleDateString()}</td>
-                <td>{payout.approvedAt ? new Date(payout.approvedAt).toLocaleDateString() : '-'}</td>
-                <td>{payout.paidAt ? new Date(payout.paidAt).toLocaleDateString() : '-'}</td>
-                <td>
-                  {!payout.primaryBank ? (
-                    <span className="transfer-unavailable">Bank info unavailable</span>
-                  ) : (
-                    <div className="transfer-info">
-                      {getTransferDisplayFields(payout.primaryBank).map(([label, value]) => (
-                        <div className="transfer-line" key={`${payout.id}-${label}`}>
-                          <span className="transfer-label">{label}:</span> {value}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </td>
-                <td>
-                  <div className="action-buttons">
+      <main className="payouts-content">
+        <div className="container">
+          <h1>Payouts Management</h1>
+          <p>Manage payout approvals and settlement operations.</p>
+
+          {!loading && !error ? (
+            <>
+              <section className="payouts-admin-summary-grid">
+                {summaryCards.map((card) => (
+                  <MoneySummaryCard
+                    key={card.key}
+                    label={card.label}
+                    amount={card.amount}
+                    trend={card.trend}
+                  />
+                ))}
+              </section>
+
+              <div className="payouts-segmented" role="tablist" aria-label="Payout filters">
+                {SEGMENTS.map((segment) => (
+                  <button
+                    key={segment.key}
+                    type="button"
+                    className={statusFilter === segment.key ? 'active' : ''}
+                    onClick={() => setStatusFilter(segment.key)}
+                  >
+                    {segment.label}
+                    <small>{statusCounts[segment.key] || 0}</small>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+
+          {loading ? (
+            <div className="loading">Loading payouts...</div>
+          ) : error ? (
+            <div className="error">
+              {error}
+              <button onClick={fetchPayouts} className="retry-btn">Retry</button>
+            </div>
+          ) : totalItems === 0 ? (
+            <div className="no-payouts">
+              <p>No payouts found.</p>
+            </div>
+          ) : (
+            <>
+              <div className="payouts-admin-table-wrap">
+                <table className="payouts-admin-table">
+                  <thead>
+                    <tr>
+                      <th className="payout-expand-col" />
+                      <th>Event</th>
+                      <th>Organizer</th>
+                      <th className="sortable">
+                        <button type="button" onClick={() => requestSort(SORTABLE_FIELDS.amount)}>
+                          Amount
+                        </button>
+                      </th>
+                      <th className="sortable">
+                        <button type="button" onClick={() => requestSort(SORTABLE_FIELDS.status)}>
+                          Status
+                        </button>
+                      </th>
+                      <th className="sortable">
+                        <button type="button" onClick={() => requestSort(SORTABLE_FIELDS.requestedDate)}>
+                          Requested Date
+                        </button>
+                      </th>
+                      <th>Approved Date</th>
+                      <th>Paid Date</th>
+                      <th className="payout-actions-col">Actions</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {visibleRows.map((payout) => (
+                      <PayoutRow
+                        key={payout.id}
+                        payout={payout}
+                        isExpanded={Boolean(expandedRows[payout.id])}
+                        onToggleExpand={toggleExpand}
+                        onAction={runPayoutAction}
+                        formatMoney={formatMoney}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="payouts-pagination">
+                <span>Showing {rangeStart}-{rangeEnd} of {totalItems}</span>
+                <div className="payouts-pagination-controls">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </button>
+
+                  {pages.map((pageNumber) => (
                     <button
-                      onClick={() => handleCopyTransferDetails(payout)}
-                      className="action-btn copy-transfer-btn"
-                      disabled={!payout.primaryBank || copyingPayoutId === payout.id}
+                      key={pageNumber}
+                      type="button"
+                      className={pageNumber === currentPage ? 'active' : ''}
+                      onClick={() => setCurrentPage(pageNumber)}
                     >
-                      {!payout.primaryBank
-                        ? 'Copy Unavailable'
-                        : copiedPayoutId === payout.id
-                          ? 'Copied'
-                          : copyingPayoutId === payout.id
-                            ? 'Copying...'
-                            : 'Copy transfer details'}
+                      {pageNumber}
                     </button>
-                    {payout.status === 'REQUESTED' && (
-                      <button
-                        onClick={() => onApprove(payout.id)}
-                        className="action-btn approve-btn"
-                      >
-                        Approve
-                      </button>
-                    )}
-                    {(payout.status === 'APPROVED' || payout.status === 'PROCESSING') && (
-                      <button
-                        onClick={() => onMarkPaid(payout.id)}
-                        className="action-btn paid-btn"
-                      >
-                        Mark Paid
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </main>
     </div>
   )
 }

@@ -1,78 +1,159 @@
-import { useState, useEffect } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import Login from './components/Login'
 import Dashboard from './components/Dashboard'
 import EventsPage from './components/EventsPage'
 import PayoutsPage from './components/PayoutsPage'
 import FeePage from './components/FeePage'
-import './App.css'
 import CreateFeePolicyPage from './components/CreatePolicyPage'
 import UpdatePolicyPage from './components/UpdatePolicyPage'
+import ForbiddenPage from './components/ForbiddenPage'
+import {
+  clearStoredAccessToken,
+  isAdminUser,
+  logoutSession,
+  verifyAdminSession
+} from './lib/apiClient'
+import './App.css'
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
+  const [authState, setAuthState] = useState({
+    status: 'loading',
+    user: null,
+    error: ''
+  })
 
-  useEffect(() => {
-    // Check authentication status on mount
-    const authStatus = localStorage.getItem('isAuthenticated')
-    setIsAuthenticated(authStatus === 'true')
-    setIsLoading(false)
+  const checkSession = useCallback(async () => {
+    setAuthState((prev) => ({ ...prev, status: 'loading', error: '' }))
+
+    const result = await verifyAdminSession()
+
+    if (result.status === 'authorized') {
+      setAuthState({ status: 'authorized', user: result.user, error: '' })
+      return
+    }
+
+    if (result.status === 'forbidden') {
+      setAuthState({ status: 'forbidden', user: result.user || null, error: '' })
+      return
+    }
+
+    if (result.status === 'error') {
+      setAuthState({ status: 'unauthorized', user: null, error: result.message || 'Session verification failed.' })
+      return
+    }
+
+    clearStoredAccessToken()
+    setAuthState({ status: 'unauthorized', user: null, error: '' })
   }, [])
 
-  const handleLogin = () => {
-    setIsAuthenticated(true)
-  }
+  useEffect(() => {
+    checkSession()
+  }, [checkSession])
 
-  const handleLogout = () => {
-    localStorage.removeItem('isAuthenticated')
-    localStorage.removeItem('username')
-    setIsAuthenticated(false)
-  }
+  useEffect(() => {
+    const onUnauthorized = () => {
+      clearStoredAccessToken()
+      setAuthState({ status: 'unauthorized', user: null, error: 'Session expired. Please log in again.' })
+    }
 
-  // Add logout function to window for Navigation component
+    const onForbidden = () => {
+      setAuthState((prev) => ({ ...prev, status: 'forbidden' }))
+    }
+
+    window.addEventListener('auth:unauthorized', onUnauthorized)
+    window.addEventListener('auth:forbidden', onForbidden)
+
+    return () => {
+      window.removeEventListener('auth:unauthorized', onUnauthorized)
+      window.removeEventListener('auth:forbidden', onForbidden)
+    }
+  }, [])
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await logoutSession()
+    } catch {
+      // If logout endpoint fails, still clear local token fallback and session state.
+    }
+
+    clearStoredAccessToken()
+    setAuthState({ status: 'unauthorized', user: null, error: '' })
+  }, [])
+
+  const handleLoginSuccess = useCallback((user) => {
+    if (isAdminUser(user)) {
+      setAuthState({ status: 'authorized', user, error: '' })
+      return
+    }
+
+    setAuthState({ status: 'forbidden', user: user || null, error: '' })
+  }, [])
+
   useEffect(() => {
     window.logout = handleLogout
-  }, [])
 
-  if (isLoading) {
+    return () => {
+      delete window.logout
+    }
+  }, [handleLogout])
+
+  if (authState.status === 'loading') {
     return <div className="loading">Loading...</div>
   }
 
-  if (!isAuthenticated) {
-    return <Login onLogin={handleLogin} />
+  const protectedElement = (element) => {
+    if (authState.status === 'authorized') return element
+    if (authState.status === 'forbidden') return <Navigate to="/forbidden" replace />
+    return <Navigate to="/login" replace />
   }
 
   return (
     <div className="App">
       <Routes>
         <Route
+          path="/login"
+          element={
+            authState.status === 'authorized'
+              ? <Navigate to="/dashboard" replace />
+              : <Login onRetry={checkSession} onLoginSuccess={handleLoginSuccess} isChecking={authState.status === 'loading'} error={authState.error} />
+          }
+        />
+        <Route
+          path="/forbidden"
+          element={
+            authState.status === 'authorized'
+              ? <Navigate to="/dashboard" replace />
+              : <ForbiddenPage onRetry={checkSession} />
+          }
+        />
+        <Route
           path="/dashboard"
-          element={<Dashboard />}
+          element={protectedElement(<Dashboard />)}
         />
         <Route
           path="/events"
-          element={<EventsPage />}
+          element={protectedElement(<EventsPage />)}
         />
         <Route
           path="/payouts"
-          element={<PayoutsPage />}
+          element={protectedElement(<PayoutsPage />)}
         />
         <Route
           path="/fee"
-          element={<FeePage />}
+          element={protectedElement(<FeePage />)}
         />
         <Route
           path="/fee/create"
-          element={<CreateFeePolicyPage />}
+          element={protectedElement(<CreateFeePolicyPage />)}
         />
         <Route
           path="/fee/update/:id"
-          element={<UpdatePolicyPage />}
+          element={protectedElement(<UpdatePolicyPage />)}
         />
         <Route
-          path="/"
-          element={<Navigate to="/dashboard" replace />}
+          path="*"
+          element={<Navigate to={authState.status === 'authorized' ? '/dashboard' : '/login'} replace />}
         />
       </Routes>
     </div>

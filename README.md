@@ -1,12 +1,56 @@
-# React + Vite
+# Festivo Admin Dashboard (Frontend)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite admin dashboard for Events, Payouts, and Fee Policy administration.
 
-Currently, two official plugins are available:
+## Environment
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Create a `.env` file:
 
-## Expanding the ESLint configuration
+```bash
+VITE_API_URL=https://test-api.festivo.io
+# Optional: comma-separated profile/session endpoints used by admin guard
+VITE_AUTH_PROFILE_ENDPOINTS=/api/auth/profile,/api/auth/me
+# Optional: logout endpoint used when clicking Logout
+VITE_AUTH_LOGOUT_ENDPOINT=/api/auth/logout
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Auth model
+
+- Admin login page submits to `POST /api/auth/admin/login` with:
+  - `email`
+  - `password`
+- Login response shape:
+  - `{ success, data: { user, token } }`
+  - backend also sets `auth_token` HttpOnly cookie
+- Admin API auth is session-based with an HttpOnly cookie (`auth_token`).
+- Frontend requests always send credentials (`credentials: 'include'`).
+- Bearer token fallback is supported when a token exists in in-memory auth state (and legacy local-storage token keys if present).
+- Admin access is allowed only if user satisfies:
+  - `user.userType === "ADMIN"`, or
+  - `user.isAdmin === true`
+
+## CORS and cross-site cookie requirements
+
+Backend must be configured to allow credentialed requests:
+
+- `Access-Control-Allow-Credentials: true`
+- `Access-Control-Allow-Origin` must be a specific origin (not `*`)
+- Cookie must be set with correct cross-site attributes (typically `SameSite=None; Secure` for cross-site HTTPS setups)
+
+## Error handling behavior
+
+- `401` -> treated as missing/expired session and redirected to login.
+- `403` -> treated as authenticated but non-admin and shown forbidden screen.
+
+## Development
+
+```bash
+npm install
+npm run dev
+```
+
+## Build
+
+```bash
+npm run build
+```

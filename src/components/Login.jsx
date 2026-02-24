@@ -1,49 +1,54 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { ApiError, loginAdmin } from '../lib/apiClient'
 import './Login.css'
 
-function Login({ onLogin }) {
-  const [credentials, setCredentials] = useState({
-    username: '',
+function Login({ onRetry, onLoginSuccess, isChecking, error }) {
+  const [formData, setFormData] = useState({
+    email: '',
     password: ''
   })
-  const [error, setError] = useState('')
-
-  // Dummy credentials
-  const VALID_CREDENTIALS = {
-    username: 'admin',
-    password: 'admin123'
-  }
-
-  useEffect(() => {
-    // Check if user is already logged in
-    const isAuthenticated = localStorage.getItem('isAuthenticated')
-    if (isAuthenticated === 'true') {
-      onLogin()
-    }
-  }, [onLogin])
-
-  const handleSubmit = (e) => {
-    e.preventDefault()
-    setError('')
-
-    if (
-      credentials.username === VALID_CREDENTIALS.username &&
-      credentials.password === VALID_CREDENTIALS.password
-    ) {
-      localStorage.setItem('isAuthenticated', 'true')
-      localStorage.setItem('username', credentials.username)
-      onLogin()
-    } else {
-      setError('Invalid username or password')
-    }
-  }
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
 
   const handleInputChange = (e) => {
     const { name, value } = e.target
-    setCredentials(prev => ({
-      ...prev,
-      [name]: value
-    }))
+    setFormData((prev) => ({ ...prev, [name]: value }))
+  }
+
+  const getLoginErrorMessage = (loginError) => {
+    if (!(loginError instanceof ApiError)) {
+      return loginError?.message || 'Unable to login. Please try again.'
+    }
+
+    if (loginError.status === 400) return 'Please provide a valid email and password.'
+    if (loginError.status === 401) return 'Invalid admin credentials.'
+    if (loginError.status >= 500) return 'Server error while logging in. Please try again shortly.'
+
+    return loginError.message || 'Unable to login. Please try again.'
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setSubmitError('')
+    setIsSubmitting(true)
+
+    try {
+      const response = await loginAdmin({
+        email: formData.email.trim(),
+        password: formData.password
+      })
+
+      const user = response?.data?.user || response?.user || null
+      if (!user) {
+        throw new Error('Login succeeded but user payload was missing.')
+      }
+
+      onLoginSuccess(user)
+    } catch (loginError) {
+      setSubmitError(getLoginErrorMessage(loginError))
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -51,8 +56,8 @@ function Login({ onLogin }) {
       <div className="login-container">
         <div className="login-card">
           <div className="login-header">
-            <h1>Festivo Dashboard</h1>
-            <p>Please login to continue</p>
+            <h1>Festivo Admin Dashboard</h1>
+            <p>Sign in with admin credentials to continue.</p>
           </div>
 
           {error && (
@@ -61,46 +66,55 @@ function Login({ onLogin }) {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="login-form">
+          {submitError && (
+            <div className="login-error">
+              {submitError}
+            </div>
+          )}
+
+          <form className="login-form" onSubmit={handleSubmit}>
             <div className="form-group">
-              <label htmlFor="username">Username</label>
+              <label htmlFor="email">Email</label>
               <input
-                type="text"
-                id="username"
-                name="username"
-                value={credentials.username}
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                value={formData.email}
                 onChange={handleInputChange}
-                placeholder="Enter username"
                 required
-                autoComplete="username"
               />
             </div>
-
             <div className="form-group">
               <label htmlFor="password">Password</label>
               <input
-                type="password"
                 id="password"
                 name="password"
-                value={credentials.password}
-                onChange={handleInputChange}
-                placeholder="Enter password"
-                required
+                type="password"
                 autoComplete="current-password"
+                value={formData.password}
+                onChange={handleInputChange}
+                required
               />
             </div>
-
-            <button type="submit" className="login-btn">
-              Login
+            <button
+              type="submit"
+              className="login-btn"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Signing In...' : 'Sign In'}
             </button>
           </form>
 
-          <div className="login-footer">
-            <p className="demo-credentials">
-              <strong>Demo Credentials:</strong><br />
-              Username: admin<br />
-              Password: admin123
-            </p>
+          <div className="login-actions">
+            <button
+              type="button"
+              className="login-link-btn"
+              onClick={onRetry}
+              disabled={isChecking}
+            >
+              {isChecking ? 'Checking Session...' : 'Retry Session Check'}
+            </button>
           </div>
         </div>
       </div>

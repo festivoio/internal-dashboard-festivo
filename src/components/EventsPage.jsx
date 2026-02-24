@@ -1,40 +1,68 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import Navigation from './Navigation'
 import EventsList from './EventList'
+import { ApiError, apiRequest } from '../lib/apiClient'
+import './EventsPage.css'
+
+function normalizeEventType(type) {
+  if (!type) return 'GENERAL'
+  return type.toString().toUpperCase()
+}
 
 function EventsPage() {
   const [events, setEvents] = useState([])
   const [filteredEvents, setFilteredEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+
   const [searchTerm, setSearchTerm] = useState('')
-
-  const API_URL = import.meta.env.VITE_API_URL || 'https://test-api.festivo.io'
-
-  // Admin credentials from environment variables
-  const ADMIN_CREDENTIALS = {
-    username: 'rique',
-    password: '213nbu340eseAS&^$Usds^%h9'
-  }
+  const [statusFilter, setStatusFilter] = useState('ALL')
+  const [typeFilter, setTypeFilter] = useState('ALL')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
 
   useEffect(() => {
     fetchEvents()
   }, [])
 
-  const filterAndSearchEvents = useCallback(() => {
-    let filtered = events
+  const eventTypes = useMemo(() => {
+    const types = Array.from(new Set(events.map((event) => normalizeEventType(event.type))))
+    return types.sort((a, b) => a.localeCompare(b))
+  }, [events])
 
-    // Search by event name, organization name, or phone
-    if (searchTerm) {
-      filtered = filtered.filter(event =>
-        event.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        event.organization.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (event.phone && event.phone.includes(searchTerm))
-      )
+  const filterAndSearchEvents = useCallback(() => {
+    let filtered = [...events]
+
+    if (searchTerm.trim()) {
+      const query = searchTerm.trim().toLowerCase()
+      filtered = filtered.filter((event) => {
+        const name = event.name?.toLowerCase() || ''
+        const orgName = event.organization?.name?.toLowerCase() || ''
+        const type = event.type?.toLowerCase() || ''
+        return name.includes(query) || orgName.includes(query) || type.includes(query)
+      })
+    }
+
+    if (statusFilter !== 'ALL') {
+      filtered = filtered.filter((event) => (event.status || '').toUpperCase() === statusFilter)
+    }
+
+    if (typeFilter !== 'ALL') {
+      filtered = filtered.filter((event) => normalizeEventType(event.type) === typeFilter)
+    }
+
+    if (dateFrom) {
+      const minDate = new Date(`${dateFrom}T00:00:00`)
+      filtered = filtered.filter((event) => new Date(event.startDateTime) >= minDate)
+    }
+
+    if (dateTo) {
+      const maxDate = new Date(`${dateTo}T23:59:59`)
+      filtered = filtered.filter((event) => new Date(event.startDateTime) <= maxDate)
     }
 
     setFilteredEvents(filtered)
-  }, [events, searchTerm])
+  }, [events, searchTerm, statusFilter, typeFilter, dateFrom, dateTo])
 
   useEffect(() => {
     filterAndSearchEvents()
@@ -42,106 +70,180 @@ function EventsPage() {
 
   const fetchEvents = async () => {
     try {
-      setLoading(true);
-      
-      const response = await fetch(`${API_URL}/api/events/admin/getEvents`, {
-        method: 'POST', // Changed from GET to POST to send credentials in body
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(ADMIN_CREDENTIALS) // Include admin credentials
-      });
+      setLoading(true)
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch events');
-      }
-      
-      const data = await response.json();
-      // Filter out draft and cancelled events
-      const filteredEvents = data.data.events.filter(event => 
-        event.status !== 'DRAFT' && event.status !== 'CANCELLED'
-      );
-      setEvents(filteredEvents);
-      setFilteredEvents(filteredEvents);
-      setError('');
-      
+      const data = await apiRequest('/api/events/admin/getEvents', {
+        method: 'POST',
+        body: {}
+      })
+
+      const fetchedEvents = data?.data?.events || []
+      setEvents(fetchedEvents)
+      setFilteredEvents(fetchedEvents)
+      setError('')
     } catch (err) {
-      setError('Error loading events: ' + err.message);
+      setError('Error loading events: ' + err.message)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
   }
 
-  const handleStatusChange = async (eventId, newStatus) => {
+  const openEventUrl = (event, mode = 'view') => {
+    const customBase = import.meta.env.VITE_EVENT_DETAILS_BASE_URL || 'https://festivo.io/events'
+    const eventId = event?.id
+
+    if (!eventId) return
+
+    const pathSuffix = mode === 'edit' ? `/edit/${eventId}` : `/${eventId}`
+    window.open(`${customBase}${pathSuffix}`, '_blank', 'noopener,noreferrer')
+  }
+
+  const handleEventAction = async (action, event) => {
+    const eventId = event?.id
+    if (!eventId) return
+
     try {
-      // Determine which endpoint to call based on status change
-      let endpoint = ''
-      if (newStatus === 'CANCELLED') {
-        endpoint = `${API_URL}/api/events/${eventId}/cancel`
-      } else if (newStatus === 'PUBLISHED') {
-        endpoint = `${API_URL}/api/events/${eventId}/publish`
-      } else {
-        throw new Error('Invalid status change')
+      if (action === 'view') {
+        openEventUrl(event, 'view')
+        return
       }
 
-      const response = await fetch(endpoint, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(ADMIN_CREDENTIALS) // Include admin credentials
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.message || `Failed to ${newStatus.toLowerCase()} event`)
+      if (action === 'edit') {
+        openEventUrl(event, 'edit')
+        return
       }
 
-      // Update local state only after successful API call
-      setEvents(prevEvents => 
-        prevEvents.map(event => 
-          event.id === eventId 
-            ? { ...event, status: newStatus }
-            : event
-        )
-      )
-    } catch (err) {
-      console.error('Error updating status:', err)
-      setError(`Error updating event status: ${err.message}`)
+      if (action === 'publish') {
+        await apiRequest(`/api/events/${eventId}/publish`, {
+          method: 'PATCH'
+        })
+
+        setEvents((prevEvents) => prevEvents.map((item) => (
+          item.id === eventId ? { ...item, status: 'PUBLISHED' } : item
+        )))
+        return
+      }
+
+      if (action === 'unpublish') {
+        try {
+          await apiRequest(`/api/events/${eventId}/unpublish`, {
+            method: 'PATCH'
+          })
+
+          setEvents((prevEvents) => prevEvents.map((item) => (
+            item.id === eventId ? { ...item, status: 'DRAFT' } : item
+          )))
+        } catch (unpublishError) {
+          if (!(unpublishError instanceof ApiError) || ![404, 405].includes(unpublishError.status)) {
+            throw unpublishError
+          }
+
+          await apiRequest(`/api/events/${eventId}/cancel`, {
+            method: 'PATCH'
+          })
+
+          setEvents((prevEvents) => prevEvents.map((item) => (
+            item.id === eventId ? { ...item, status: 'CANCELLED' } : item
+          )))
+        }
+        return
+      }
+
+      if (action === 'delete') {
+        const confirmed = window.confirm('Delete this event? This action cannot be undone.')
+        if (!confirmed) return
+
+        await apiRequest(`/api/events/${eventId}`, {
+          method: 'DELETE'
+        })
+
+        setEvents((prevEvents) => prevEvents.filter((item) => item.id !== eventId))
+      }
+    } catch (actionError) {
+      setError(`Error while performing action: ${actionError.message}`)
     }
+  }
+
+  const clearFilters = () => {
+    setSearchTerm('')
+    setStatusFilter('ALL')
+    setTypeFilter('ALL')
+    setDateFrom('')
+    setDateTo('')
   }
 
   return (
     <div className="events-page">
       <Navigation />
-      
+
       <main className="events-content">
         <div className="container">
           <h1>Events Management</h1>
-          <p>Manage all your events from this page.</p>
-          
+          <p>Manage and review all events from one place.</p>
+
           {!loading && !error && (
-            <div className="search-filter-container">
+            <div className="events-admin-toolbar">
               <input
-                className="search-input"
+                className="events-admin-search"
                 type="text"
-                placeholder="Search events, organizations, or phone numbers..."
+                placeholder="Search events, organizations, or type"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
-              {searchTerm && (
-                <button
-                  className="clear-filter-btn"
-                  onClick={() => {
-                    setSearchTerm('')
-                  }}
-                >
-                  Clear
-                </button>
-              )}
+
+              <select
+                className="events-admin-filter"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <option value="ALL">All Status</option>
+                <option value="DRAFT">Draft</option>
+                <option value="PUBLISHED">Published</option>
+                <option value="ONGOING">Ongoing</option>
+                <option value="COMPLETED">Completed</option>
+                <option value="CANCELLED">Cancelled</option>
+              </select>
+
+              <select
+                className="events-admin-filter"
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+              >
+                <option value="ALL">All Types</option>
+                {eventTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                className="events-admin-filter"
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                aria-label="Date from"
+              />
+
+              <input
+                className="events-admin-filter"
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                aria-label="Date to"
+              />
+
+              <button
+                type="button"
+                className="events-admin-clear-btn"
+                onClick={clearFilters}
+              >
+                Reset
+              </button>
+
             </div>
           )}
-          
+
           {loading ? (
             <div className="loading">Loading events...</div>
           ) : error ? (
@@ -152,9 +254,9 @@ function EventsPage() {
               </button>
             </div>
           ) : (
-            <EventsList 
-              events={filteredEvents} 
-              onStatusChange={handleStatusChange}
+            <EventsList
+              events={filteredEvents}
+              onAction={handleEventAction}
             />
           )}
         </div>

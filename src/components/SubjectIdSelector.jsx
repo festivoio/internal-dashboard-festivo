@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { apiRequest } from '../lib/apiClient'
 import './SubjectIdSelector.css'
 
 function SubjectIdSelector({ subjectType, onSelectId, currentId }) {
@@ -8,13 +9,6 @@ function SubjectIdSelector({ subjectType, onSelectId, currentId }) {
   const [error, setError] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [isOpen, setIsOpen] = useState(false)
-
-  const API_URL = import.meta.env.VITE_API_URL || 'https://test-api.festivo.io'
-
-  const ADMIN_CREDENTIALS = {
-    username: 'rique',
-    password: '213nbu340eseAS&^$Usds^%h9'
-  }
 
   useEffect(() => {
     if (subjectType !== 'GLOBAL') {
@@ -57,26 +51,17 @@ function SubjectIdSelector({ subjectType, onSelectId, currentId }) {
     try {
       let endpoint = ''
       if (subjectType === 'ORGANIZATION') {
-        endpoint = `${API_URL}/api/fees/admin/organizations`
+        endpoint = '/api/fees/admin/organizations'
       } else if (subjectType === 'EVENT') {
-        endpoint = `${API_URL}/api/fees/admin/events`
+        endpoint = '/api/fees/admin/events'
       } else if (subjectType === 'USER') {
-        endpoint = `${API_URL}/api/fees/admin/users`
+        endpoint = '/api/fees/admin/users'
       }
 
-      const response = await fetch(endpoint, {
+      const data = await apiRequest(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(ADMIN_CREDENTIALS)
+        body: {}
       })
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch ${subjectType.toLowerCase()}s`)
-      }
-
-      const data = await response.json()
       if (data.success) {
         setItems(data.data || [])
         setFilteredItems(data.data || [])

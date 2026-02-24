@@ -1,39 +1,43 @@
-function EventsList({ events, onStatusChange }) {
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'PUBLISHED':
-        return 'status-published'
-      case 'DRAFT':
-        return 'status-draft'
-      case 'CANCELLED':
-        return 'status-cancelled'
-      default:
-        return 'status-default'
-    }
+import { useEffect, useMemo, useState } from 'react'
+import EventRow from './EventRow'
+
+const PAGE_SIZE = 10
+
+function buildPageNumbers(currentPage, totalPages) {
+  const pages = []
+  const start = Math.max(1, currentPage - 1)
+  const end = Math.min(totalPages, currentPage + 1)
+
+  for (let page = start; page <= end; page += 1) {
+    pages.push(page)
   }
 
-  const getNextStatus = (currentStatus) => {
-    switch (currentStatus) {
-      case 'PUBLISHED':
-        return 'CANCELLED'
-      case 'CANCELLED':
-        return 'PUBLISHED'
-      case 'DRAFT':
-        return 'PUBLISHED'
-      default:
-        return 'PUBLISHED'
-    }
-  }
+  if (!pages.includes(1)) pages.unshift(1)
+  if (!pages.includes(totalPages)) pages.push(totalPages)
 
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
+  return Array.from(new Set(pages))
+}
+
+function EventsList({ events, onAction }) {
+  const [currentPage, setCurrentPage] = useState(1)
+
+  const totalItems = events.length
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE))
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [totalItems])
+
+  const paginatedEvents = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGE_SIZE
+    const endIndex = startIndex + PAGE_SIZE
+    return events.slice(startIndex, endIndex)
+  }, [events, currentPage])
+
+  const rangeStart = totalItems === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1
+  const rangeEnd = Math.min(currentPage * PAGE_SIZE, totalItems)
+
+  const pages = buildPageNumbers(currentPage, totalPages)
 
   if (!events.length) {
     return (
@@ -44,55 +48,61 @@ function EventsList({ events, onStatusChange }) {
   }
 
   return (
-    <div className="events-list">
+    <div className="events-admin-table-shell">
       <div className="events-header">
         <h2>Events ({events.length})</h2>
       </div>
-      
-      <div className="table-container">
-        <table className="events-table">
+
+      <div className="events-admin-table-wrap">
+        <table className="events-admin-table">
           <thead>
             <tr>
-              <th>Event Name</th>
-              <th>Type</th>
-              <th>Organization Name</th>
-              <th>Organization Owner</th>
-              <th>Phone</th>
+              <th>Event</th>
               <th>Date</th>
-              <th>Views</th>
-              <th>Tickets Sold</th>
+              <th className="event-col-number">Tickets Sold</th>
+              <th className="event-col-number">Views</th>
               <th>Status</th>
-              <th>Action</th>
+              <th className="event-col-actions">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {events.map((event) => (
-              <tr key={event.id}>
-                <td className="event-name">{event.name}</td>
-                <td className="event-type">{event.type}</td>
-                <td>{event.organization.name}</td>
-                <td>{event.organization.owner || event.organization.name}</td>
-                <td>{event.phone || 'N/A'}</td>
-                <td>{formatDate(event.startDateTime)}</td>
-                <td>{event.totalViews || 0}</td>
-                <td>{event.ticketGenres?.reduce((total, genre) => total + (genre.soldSeats || 0), 0) || 0}</td>
-                <td>
-                  <span className={`status-badge ${getStatusColor(event.status)}`}>
-                    {event.status}
-                  </span>
-                </td>
-                <td>
-                  <button
-                    onClick={() => onStatusChange(event.id, getNextStatus(event.status))}
-                    className={`action-btn ${getStatusColor(getNextStatus(event.status))}`}
-                  >
-                    Mark as {getNextStatus(event.status)}
-                  </button>
-                </td>
-              </tr>
+            {paginatedEvents.map((event) => (
+              <EventRow key={event.id} event={event} onAction={onAction} />
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className="events-pagination-bar">
+        <p>
+          Showing {rangeStart}-{rangeEnd} of {totalItems}
+        </p>
+        <div className="events-pagination-controls">
+          <button
+            type="button"
+            disabled={currentPage <= 1}
+            onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+          >
+            Previous
+          </button>
+          {pages.map((pageNumber) => (
+            <button
+              key={pageNumber}
+              type="button"
+              className={currentPage === pageNumber ? 'active' : ''}
+              onClick={() => setCurrentPage(pageNumber)}
+            >
+              {pageNumber}
+            </button>
+          ))}
+          <button
+            type="button"
+            disabled={currentPage >= totalPages}
+            onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+          >
+            Next
+          </button>
+        </div>
       </div>
     </div>
   )
