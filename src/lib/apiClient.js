@@ -3,6 +3,30 @@ const API_URL = import.meta.env.VITE_API_URL || ''
 const TOKEN_KEYS = ['token', 'authToken', 'accessToken', 'adminToken']
 let inMemoryAccessToken = null
 
+function readFromStorage(storage, key) {
+  try {
+    return storage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeToStorage(storage, key, value) {
+  try {
+    storage.setItem(key, value)
+  } catch {
+    // no-op when storage is unavailable
+  }
+}
+
+function removeFromStorage(storage, key) {
+  try {
+    storage.removeItem(key)
+  } catch {
+    // no-op when storage is unavailable
+  }
+}
+
 export class ApiError extends Error {
   constructor(message, status, data = null) {
     super(message)
@@ -16,7 +40,7 @@ export function getStoredAccessToken() {
   if (inMemoryAccessToken) return inMemoryAccessToken
 
   for (const key of TOKEN_KEYS) {
-    const value = localStorage.getItem(key)
+    const value = readFromStorage(sessionStorage, key) || readFromStorage(localStorage, key)
     if (value) return value
   }
 
@@ -25,11 +49,19 @@ export function getStoredAccessToken() {
 
 export function setInMemoryAccessToken(token) {
   inMemoryAccessToken = token || null
+
+  if (!token) return
+
+  // Keep refresh-safe fallback without requiring full persistent login state.
+  writeToStorage(sessionStorage, 'accessToken', token)
 }
 
 export function clearStoredAccessToken() {
   inMemoryAccessToken = null
-  TOKEN_KEYS.forEach((key) => localStorage.removeItem(key))
+  TOKEN_KEYS.forEach((key) => {
+    removeFromStorage(sessionStorage, key)
+    removeFromStorage(localStorage, key)
+  })
 }
 
 function buildUrl(path) {

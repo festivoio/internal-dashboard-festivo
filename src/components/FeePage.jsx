@@ -105,6 +105,16 @@ function FeePage() {
     return { active, upcoming, expired, total: policies.length, now }
   }, [policies])
 
+  const sortedPolicies = useMemo(() => {
+    const resolvePolicyDate = (policy) => {
+      const rawDate = policy.activeFrom || policy.activeTo || policy.createdAt || policy.updatedAt
+      const time = rawDate ? new Date(rawDate).getTime() : 0
+      return Number.isFinite(time) ? time : 0
+    }
+
+    return [...policies].sort((a, b) => resolvePolicyDate(b) - resolvePolicyDate(a))
+  }, [policies])
+
   const resolveSubjectLabel = (policy) => {
     const scope = normalizeScope(policy.subjectType)
     if (scope === 'GLOBAL') return 'Global Policy'
@@ -221,7 +231,7 @@ function FeePage() {
                   </thead>
 
                   <tbody>
-                    {policies.map((policy) => {
+                    {sortedPolicies.map((policy) => {
                       const status = getPolicyStatus(policy)
                       const tierPreview = buildTierPreview(policy.rules?.tiers || [])
                       const subjectLabel = resolveSubjectLabel(policy)

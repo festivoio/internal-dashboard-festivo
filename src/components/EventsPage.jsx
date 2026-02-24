@@ -9,6 +9,28 @@ function normalizeEventType(type) {
   return type.toString().toUpperCase()
 }
 
+function getEventTimeValue(event) {
+  const dateValue = event?.startDateTime || event?.createdAt || event?.updatedAt || 0
+  const time = new Date(dateValue).getTime()
+  return Number.isFinite(time) ? time : 0
+}
+
+function sortEventsForReviewAndRecency(rows) {
+  return [...rows].sort((a, b) => {
+    const statusA = (a?.status || '').toUpperCase()
+    const statusB = (b?.status || '').toUpperCase()
+
+    const inReviewA = statusA === 'IN_REVIEW' ? 1 : 0
+    const inReviewB = statusB === 'IN_REVIEW' ? 1 : 0
+
+    if (inReviewA !== inReviewB) {
+      return inReviewB - inReviewA
+    }
+
+    return getEventTimeValue(b) - getEventTimeValue(a)
+  })
+}
+
 function EventsPage() {
   const [events, setEvents] = useState([])
   const [filteredEvents, setFilteredEvents] = useState([])
@@ -61,7 +83,7 @@ function EventsPage() {
       filtered = filtered.filter((event) => new Date(event.startDateTime) <= maxDate)
     }
 
-    setFilteredEvents(filtered)
+    setFilteredEvents(sortEventsForReviewAndRecency(filtered))
   }, [events, searchTerm, statusFilter, typeFilter, dateFrom, dateTo])
 
   useEffect(() => {
@@ -78,8 +100,9 @@ function EventsPage() {
       })
 
       const fetchedEvents = data?.data?.events || []
-      setEvents(fetchedEvents)
-      setFilteredEvents(fetchedEvents)
+      const sorted = sortEventsForReviewAndRecency(fetchedEvents)
+      setEvents(sorted)
+      setFilteredEvents(sorted)
       setError('')
     } catch (err) {
       setError('Error loading events: ' + err.message)
@@ -198,6 +221,7 @@ function EventsPage() {
               >
                 <option value="ALL">All Status</option>
                 <option value="DRAFT">Draft</option>
+                <option value="IN_REVIEW">In Review</option>
                 <option value="PUBLISHED">Published</option>
                 <option value="ONGOING">Ongoing</option>
                 <option value="COMPLETED">Completed</option>
