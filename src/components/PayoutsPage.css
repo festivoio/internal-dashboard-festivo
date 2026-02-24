@@ -69,8 +69,10 @@
 .payouts-admin-table-wrap {
   border: 1px solid #e2e7f1;
   border-radius: 14px;
-  overflow: hidden;
+  overflow: visible;
   background: #fff;
+  position: relative;
+  z-index: 1;
 }
 
 .payouts-admin-table {
@@ -81,6 +83,8 @@
 
 .payouts-admin-table th,
 .payouts-admin-table td {
+  position: relative;
+  overflow: visible;
   text-align: left;
   padding: 12px 14px;
   border-bottom: 1px solid #edf1f7;
@@ -201,6 +205,10 @@
   display: inline-block;
 }
 
+.payout-actions-menu.open {
+  z-index: 500;
+}
+
 .payout-actions-trigger {
   width: 34px;
   height: 30px;
@@ -219,14 +227,14 @@
 .payout-actions-dropdown {
   position: absolute;
   right: 0;
-  top: calc(100% + 6px);
+  bottom: calc(100% + 6px);
   width: 160px;
   border: 1px solid #dce2ef;
   border-radius: 10px;
   background: #fff;
   box-shadow: 0 10px 24px rgba(14, 24, 50, 0.12);
   padding: 6px;
-  z-index: 20;
+  z-index: 9999;
 }
 
 .payout-actions-dropdown button {
@@ -363,6 +371,7 @@
 
   .payouts-admin-table-wrap {
     overflow-x: auto;
+    overflow-y: visible;
   }
 
   .payouts-admin-table {

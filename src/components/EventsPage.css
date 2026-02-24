@@ -49,8 +49,10 @@
 .events-admin-table-wrap {
   border: 1px solid #e6e9f1;
   border-radius: 14px;
-  overflow: hidden;
+  overflow: visible;
   background: #fff;
+  position: relative;
+  z-index: 1;
 }
 
 .events-admin-table {
@@ -68,6 +70,12 @@
   color: #5f6b85;
   border-bottom: 1px solid #eceff5;
   background: #fafbfe;
+}
+
+.events-admin-table th,
+.events-admin-table td {
+  position: relative;
+  overflow: visible;
 }
 
 .events-admin-table .event-col-number,
@@ -205,6 +213,10 @@
   display: inline-block;
 }
 
+.event-actions-menu.open {
+  z-index: 500;
+}
+
 .event-actions-trigger {
   display: inline-flex;
   align-items: center;
@@ -225,14 +237,14 @@
 .event-actions-dropdown {
   position: absolute;
   right: 0;
-  top: calc(100% + 6px);
+  bottom: calc(100% + 6px);
   min-width: 148px;
   border: 1px solid #dce1ef;
   border-radius: 10px;
   background: #fff;
   box-shadow: 0 10px 24px rgba(13, 26, 52, 0.12);
   padding: 6px;
-  z-index: 20;
+  z-index: 9999;
 }
 
 .event-actions-dropdown button {
@@ -313,6 +325,7 @@
 
   .events-admin-table-wrap {
     overflow-x: auto;
+    overflow-y: visible;
   }
 
   .events-admin-table {

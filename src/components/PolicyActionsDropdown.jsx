@@ -20,7 +20,7 @@ function PolicyActionsDropdown({ policy, onAction }) {
   }
 
   return (
-    <div className="policy-actions" ref={containerRef} onClick={(event) => event.stopPropagation()}>
+    <div className={`policy-actions ${open ? 'open' : ''}`} ref={containerRef} onClick={(event) => event.stopPropagation()}>
       <button type="button" className="policy-actions-trigger" onClick={() => setOpen((prev) => !prev)}>
         ⋯
       </button>

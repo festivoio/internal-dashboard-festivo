@@ -25,7 +25,7 @@ function EventActionsDropdown({ event, onAction }) {
   const canUnpublish = event?.status === 'PUBLISHED' || event?.status === 'ONGOING'
 
   return (
-    <div className="event-actions-menu" ref={menuRef} onClick={(e) => e.stopPropagation()}>
+    <div className={`event-actions-menu ${isOpen ? 'open' : ''}`} ref={menuRef} onClick={(e) => e.stopPropagation()}>
       <button
         type="button"
         className="event-actions-trigger"

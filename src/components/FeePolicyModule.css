@@ -58,8 +58,10 @@
 .fee-policy-table-wrap {
   border: 1px solid #e2e7f2;
   border-radius: 14px;
-  overflow: hidden;
+  overflow: visible;
   background: #fff;
+  position: relative;
+  z-index: 1;
 }
 
 .fee-policy-table {
@@ -70,6 +72,8 @@
 
 .fee-policy-table th,
 .fee-policy-table td {
+  position: relative;
+  overflow: visible;
   text-align: left;
   padding: 12px 14px;
   border-bottom: 1px solid #ecf0f7;
@@ -161,6 +165,11 @@
 .policy-actions {
   position: relative;
   display: inline-block;
+  z-index: 40;
+}
+
+.policy-actions.open {
+  z-index: 500;
 }
 
 .policy-actions-trigger {
@@ -182,14 +191,14 @@
 .policy-actions-dropdown {
   position: absolute;
   right: 0;
-  top: calc(100% + 6px);
+  bottom: calc(100% + 6px);
   width: 160px;
   border: 1px solid #dce2ef;
   border-radius: 10px;
   background: #fff;
   box-shadow: 0 10px 24px rgba(13, 24, 51, 0.12);
   padding: 6px;
-  z-index: 30;
+  z-index: 9999;
 }
 
 .policy-actions-dropdown button {
@@ -621,6 +630,15 @@
   .tier-card-grid,
   .fee-summary-row {
     grid-template-columns: 1fr;
+  }
+
+  .fee-policy-table-wrap {
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+
+  .fee-policy-table {
+    min-width: 920px;
   }
 
   .fee-sticky-actions {

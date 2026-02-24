@@ -24,7 +24,7 @@ function PayoutActionsMenu({ payout, onAction }) {
   }
 
   return (
-    <div className="payout-actions-menu" ref={menuRef} onClick={(event) => event.stopPropagation()}>
+    <div className={`payout-actions-menu ${open ? 'open' : ''}`} ref={menuRef} onClick={(event) => event.stopPropagation()}>
       <button
         type="button"
         className="payout-actions-trigger"
