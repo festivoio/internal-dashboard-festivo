@@ -1,5 +1,5 @@
-function FeeTierCard({ index, tier, onChange, onRemove, canRemove }) {
-  const upperLimitDisabled = tier.max === null
+function FeeTierCard({ index, tier, errors, onChange, onRemove, canRemove }) {
+  const upperLimitDisabled = tier.to === null
 
   return (
     <div className="tier-card">
@@ -19,9 +19,10 @@ function FeeTierCard({ index, tier, onChange, onRemove, canRemove }) {
             type="number"
             min="0"
             step="0.01"
-            value={tier.min ?? ''}
-            onChange={(event) => onChange('min', event.target.value)}
+            value={tier.from ?? ''}
+            readOnly
           />
+          {errors?.from ? <p className="tier-error">{errors.from}</p> : null}
         </div>
         <div>
           <label>To</label>
@@ -29,9 +30,9 @@ function FeeTierCard({ index, tier, onChange, onRemove, canRemove }) {
             type="number"
             min="0"
             step="0.01"
-            value={upperLimitDisabled ? '' : tier.max ?? ''}
+            value={upperLimitDisabled ? '' : tier.to ?? ''}
             disabled={upperLimitDisabled}
-            onChange={(event) => onChange('max', event.target.value)}
+            onChange={(event) => onChange('to', event.target.value)}
           />
           <label className="fee-inline-check">
             <input
@@ -41,16 +42,29 @@ function FeeTierCard({ index, tier, onChange, onRemove, canRemove }) {
             />
             No upper limit
           </label>
+          {errors?.to ? <p className="tier-error">{errors.to}</p> : null}
         </div>
         <div>
-          <label>Fee (%)</label>
+          <label>Fee Rate (decimal)</label>
           <input
             type="number"
             min="0"
             step="0.01"
-            value={Number(tier.pct || 0) * 100}
+            value={tier.pct ?? 0}
             onChange={(event) => onChange('pct', event.target.value)}
           />
+          {errors?.pct ? <p className="tier-error">{errors.pct}</p> : null}
+        </div>
+        <div>
+          <label>Min Amount</label>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={tier.min ?? 0}
+            onChange={(event) => onChange('min', event.target.value)}
+          />
+          {errors?.min ? <p className="tier-error">{errors.min}</p> : null}
         </div>
       </div>
     </div>

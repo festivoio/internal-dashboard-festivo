@@ -29,6 +29,7 @@ function PolicyActionsDropdown({ policy, onAction }) {
           <button type="button" onClick={() => run('view')}>View</button>
           <button type="button" onClick={() => run('edit')}>Edit</button>
           <button type="button" onClick={() => run('duplicate')}>Duplicate</button>
+          <button type="button" onClick={() => run('activate')}>Activate</button>
           <button type="button" onClick={() => run('deactivate')}>Deactivate</button>
           <button type="button" className="danger" onClick={() => run('delete')}>Delete</button>
         </div>

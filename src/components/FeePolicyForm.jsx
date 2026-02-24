@@ -2,17 +2,24 @@ import { useMemo, useState } from 'react'
 import DateRangePicker from './DateRangePicker'
 import FeeTierCard from './FeeTierCard'
 import ScopeSelector from './ScopeSelector'
-import { buildTierPreview, validateTiers } from './feePolicyUtils'
+import { apiRequest } from '../lib/apiClient'
+import { calculateTieredBreakdown, normalizePreviewResponse } from './feePolicyPreviewUtils'
+import {
+  apiRulesToUiTiers,
+  hasTierValidationErrors,
+  nextTierFrom,
+  uiTiersToApiRules,
+  validateUiTiers,
+  withComputedFrom
+} from './feePolicyTierUtils'
 
-function getNextMinValue(tiers) {
-  if (!tiers.length) return 0
-  const lastTier = tiers[tiers.length - 1]
+function blankPreviewItem() {
+  return { unitPrice: '', quantity: 1 }
+}
 
-  if (lastTier.max === null || lastTier.max === undefined) {
-    return Number(lastTier.min || 0) + 1
-  }
-
-  return Number(lastTier.max || 0) + 1
+function formatCurrency(value, currency) {
+  const amount = Number(value || 0)
+  return `${amount.toFixed(2)} ${currency}`
 }
 
 function FeePolicyForm({ mode, initialData, loading, onSubmit, onCancel }) {
@@ -21,79 +28,154 @@ function FeePolicyForm({ mode, initialData, loading, onSubmit, onCancel }) {
     subjectId: initialData.subjectId || '',
     subjectLabel: initialData.subjectLabel || '',
     currency: initialData.currency || 'BDT',
-    calculationType: initialData.perTicket ? 'PER_TICKET' : 'PERCENTAGE',
+    perTicket: Boolean(initialData.perTicket),
     rounding: initialData.rounding || 'ROUND',
     isActive: initialData.isActive !== undefined ? initialData.isActive : true,
     activeFrom: initialData.activeFrom || new Date().toISOString().split('T')[0],
     activeTo: initialData.activeTo || '',
     noEndDate: !initialData.activeTo,
-    tiers: initialData.tiers?.length
-      ? initialData.tiers
-      : [{ min: 0, max: null, pct: 0.03 }]
+    uiTiers: withComputedFrom(apiRulesToUiTiers({ tiers: initialData.tiers || [] }))
   }))
 
   const [formError, setFormError] = useState('')
+  const [tierErrors, setTierErrors] = useState([])
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewResult, setPreviewResult] = useState(null)
+  const [previewItems, setPreviewItems] = useState([blankPreviewItem()])
+  const [useOrganizerPreview, setUseOrganizerPreview] = useState(false)
 
-  const tierPreview = useMemo(() => buildTierPreview(formData.tiers), [formData.tiers])
+  const computedTiers = useMemo(() => withComputedFrom(formData.uiTiers), [formData.uiTiers])
+  const tierPreview = useMemo(() => {
+    return computedTiers.map((tier) => {
+      const toLabel = tier.to === null ? '∞' : tier.to
+      return `${tier.from}–${toLabel} → ${(Number(tier.pct || 0) * 100).toFixed(2)}%`
+    })
+  }, [computedTiers])
 
   const updateTier = (index, field, value) => {
-    setFormData((prev) => ({
-      ...prev,
-      tiers: prev.tiers.map((tier, tierIndex) => {
+    setFormData((prev) => {
+      const updatedTiers = prev.uiTiers.map((tier, tierIndex) => {
         if (tierIndex !== index) return tier
 
         if (field === 'noUpperLimit') {
-          return { ...tier, max: value ? null : Number(tier.min || 0) + 1 }
+          return { ...tier, to: value ? null : nextTierFrom(prev.uiTiers) }
+        }
+
+        if (field === 'to') {
+          return { ...tier, to: value === '' ? '' : Number(value) }
         }
 
         if (field === 'pct') {
-          return { ...tier, pct: value === '' ? 0 : Number(value) / 100 }
+          return { ...tier, pct: value === '' ? '' : Number(value) }
         }
 
-        return {
-          ...tier,
-          [field]: value === '' ? '' : Number(value)
+        if (field === 'min') {
+          return { ...tier, min: value === '' ? '' : Number(value) }
         }
+
+        return tier
       })
-    }))
+
+      return {
+        ...prev,
+        uiTiers: withComputedFrom(updatedTiers)
+      }
+    })
   }
 
   const addTier = () => {
     setFormData((prev) => ({
       ...prev,
-      tiers: [...prev.tiers, { min: getNextMinValue(prev.tiers), max: null, pct: 0.03 }]
+      uiTiers: withComputedFrom([
+        ...prev.uiTiers,
+        { from: nextTierFrom(prev.uiTiers), to: null, pct: 0.05, min: 0 }
+      ])
     }))
   }
 
   const removeTier = (index) => {
     setFormData((prev) => ({
       ...prev,
-      tiers: prev.tiers.filter((_, tierIndex) => tierIndex !== index)
+      uiTiers: withComputedFrom(prev.uiTiers.filter((_, rowIndex) => rowIndex !== index))
     }))
+  }
+
+  const handlePreview = async () => {
+    setPreviewLoading(true)
+    setFormError('')
+
+    try {
+      const parsedItems = previewItems.map((item) => ({
+        unitPrice: Number(item.unitPrice || 0),
+        quantity: Number(item.quantity || 1)
+      }))
+
+      const localBreakdown = calculateTieredBreakdown(computedTiers, parsedItems, formData.perTicket)
+      const endpoint = useOrganizerPreview ? '/api/fees/preview/organizer' : '/api/fees/preview'
+      const result = await apiRequest(endpoint, {
+        method: 'POST',
+        body: {
+          currency: formData.currency,
+          subjectType: formData.subjectType,
+          subjectId: formData.subjectId || undefined,
+          items: parsedItems
+        }
+      })
+
+      setPreviewResult(normalizePreviewResponse(result, parsedItems, localBreakdown))
+    } catch (previewError) {
+      setFormError(`Preview failed: ${previewError.message}`)
+      const parsedItems = previewItems.map((item) => ({
+        unitPrice: Number(item.unitPrice || 0),
+        quantity: Number(item.quantity || 1)
+      }))
+      const localBreakdown = calculateTieredBreakdown(computedTiers, parsedItems, formData.perTicket)
+      setPreviewResult(normalizePreviewResponse(null, parsedItems, localBreakdown))
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const resetForm = () => {
+    const confirmed = window.confirm('Discard unsaved changes and reset form?')
+    if (!confirmed) return
+
+    setFormData({
+      subjectType: initialData.subjectType || 'ORGANIZATION',
+      subjectId: initialData.subjectId || '',
+      subjectLabel: initialData.subjectLabel || '',
+      currency: initialData.currency || 'BDT',
+      perTicket: Boolean(initialData.perTicket),
+      rounding: initialData.rounding || 'ROUND',
+      isActive: initialData.isActive !== undefined ? initialData.isActive : true,
+      activeFrom: initialData.activeFrom || new Date().toISOString().split('T')[0],
+      activeTo: initialData.activeTo || '',
+      noEndDate: !initialData.activeTo,
+      uiTiers: withComputedFrom(apiRulesToUiTiers({ tiers: initialData.tiers || [] }))
+    })
+    setFormError('')
+    setTierErrors([])
+  }
+
+  const handleCancel = () => {
+    const confirmed = window.confirm('Discard unsaved changes and leave this page?')
+    if (!confirmed) return
+    onCancel()
   }
 
   const handleSubmit = (event) => {
     event.preventDefault()
 
-    if (formData.calculationType === 'MIXED') {
-      setFormError('Mixed calculation is reserved for a future release.')
-      return
-    }
-
-    if (!formData.subjectId && mode === 'create') {
+    if (formData.subjectType !== 'GLOBAL' && !formData.subjectId) {
       setFormError('Please select a scope target before saving.')
       return
     }
 
-    const normalizedTiers = formData.tiers.map((tier) => ({
-      min: Number(tier.min || 0),
-      max: tier.max === '' || tier.max === null ? null : Number(tier.max),
-      pct: Number(tier.pct || 0)
-    }))
+    const validation = validateUiTiers(computedTiers)
+    setTierErrors(validation.rows)
 
-    const tierValidationError = validateTiers(normalizedTiers)
-    if (tierValidationError) {
-      setFormError(tierValidationError)
+    if (hasTierValidationErrors(validation)) {
+      setFormError(validation.form[0] || 'Please fix tier validation errors.')
       return
     }
 
@@ -101,14 +183,14 @@ function FeePolicyForm({ mode, initialData, loading, onSubmit, onCancel }) {
 
     onSubmit({
       subjectType: formData.subjectType,
-      subjectId: formData.subjectId,
+      subjectId: formData.subjectType === 'GLOBAL' ? null : formData.subjectId,
       currency: formData.currency,
-      perTicket: formData.calculationType === 'PER_TICKET',
+      perTicket: formData.perTicket,
       rounding: formData.rounding,
       isActive: formData.isActive,
       activeFrom: formData.activeFrom || null,
       activeTo: formData.noEndDate ? null : (formData.activeTo || null),
-      tiers: normalizedTiers
+      rules: uiTiersToApiRules(computedTiers)
     })
   }
 
@@ -119,7 +201,7 @@ function FeePolicyForm({ mode, initialData, loading, onSubmit, onCancel }) {
         selectedId={formData.subjectId}
         selectedLabel={formData.subjectLabel}
         readOnly={mode === 'edit'}
-        onChange={(scope) => setFormData((prev) => ({ ...prev, subjectType: scope }))}
+        onChange={(scope) => setFormData((prev) => ({ ...prev, subjectType: scope, subjectId: '' }))}
         onSelectId={(id) => setFormData((prev) => ({ ...prev, subjectId: id }))}
       />
 
@@ -132,13 +214,12 @@ function FeePolicyForm({ mode, initialData, loading, onSubmit, onCancel }) {
               id="currency"
               value={formData.currency}
               onChange={(event) => setFormData((prev) => ({ ...prev, currency: event.target.value }))}
-              disabled={mode === 'edit'}
             >
+              <option value="BDT">BDT</option>
               <option value="USD">USD</option>
               <option value="EUR">EUR</option>
               <option value="GBP">GBP</option>
               <option value="CAD">CAD</option>
-              <option value="BDT">BDT</option>
             </select>
           </div>
         </div>
@@ -150,31 +231,26 @@ function FeePolicyForm({ mode, initialData, loading, onSubmit, onCancel }) {
               <label>
                 <input
                   type="radio"
-                  name="calcType"
-                  checked={formData.calculationType === 'PERCENTAGE'}
-                  onChange={() => setFormData((prev) => ({ ...prev, calculationType: 'PERCENTAGE' }))}
+                  checked={!formData.perTicket}
+                  onChange={() => setFormData((prev) => ({ ...prev, perTicket: false }))}
                 />
                 Percentage of total
               </label>
               <label>
                 <input
                   type="radio"
-                  name="calcType"
-                  checked={formData.calculationType === 'PER_TICKET'}
-                  onChange={() => setFormData((prev) => ({ ...prev, calculationType: 'PER_TICKET' }))}
+                  checked={formData.perTicket}
+                  onChange={() => setFormData((prev) => ({ ...prev, perTicket: true }))}
                 />
                 Per ticket fixed
               </label>
               <label className="is-disabled">
-                <input
-                  type="radio"
-                  name="calcType"
-                  checked={formData.calculationType === 'MIXED'}
-                  onChange={() => setFormData((prev) => ({ ...prev, calculationType: 'MIXED' }))}
-                />
+                <input type="radio" disabled />
                 Mixed (future)
               </label>
             </div>
+
+            <p className="muted-text">Percentage is decimal rate (example 0.05 = 5%).</p>
           </div>
 
           <div>
@@ -184,9 +260,9 @@ function FeePolicyForm({ mode, initialData, loading, onSubmit, onCancel }) {
               value={formData.rounding}
               onChange={(event) => setFormData((prev) => ({ ...prev, rounding: event.target.value }))}
             >
+              <option value="ROUND">Round Nearest</option>
               <option value="CEIL">Round Up</option>
               <option value="FLOOR">Round Down</option>
-              <option value="ROUND">Round Nearest</option>
             </select>
 
             <label className="switch-row">
@@ -227,16 +303,18 @@ function FeePolicyForm({ mode, initialData, loading, onSubmit, onCancel }) {
       <section className="fee-form-card">
         <div className="fee-section-header">
           <h3>Section 4: Review</h3>
-          <p className="muted-text">If multiple policies match the same subject, the newest active policy overrides older ones.</p>
+          <p className="muted-text">Final tier applies to all amounts above previous tier.</p>
+          <p className="muted-text">If multiple policies match same subject, newest active policy overrides older ones.</p>
         </div>
 
         <div className="tier-stack">
-          {formData.tiers.map((tier, index) => (
+          {computedTiers.map((tier, index) => (
             <FeeTierCard
-              key={index}
+              key={`${tier.from}-${index}`}
               index={index}
               tier={tier}
-              canRemove={formData.tiers.length > 1}
+              errors={tierErrors[index]}
+              canRemove={computedTiers.length > 1}
               onRemove={() => removeTier(index)}
               onChange={(field, value) => updateTier(index, field, value)}
             />
@@ -256,14 +334,116 @@ function FeePolicyForm({ mode, initialData, loading, onSubmit, onCancel }) {
           </div>
         </div>
 
+        <div className="preview-panel">
+          <div className="preview-head">
+            <h4>Preview Calculator</h4>
+            <label className="fee-inline-check">
+              <input
+                type="checkbox"
+                checked={useOrganizerPreview}
+                onChange={(event) => setUseOrganizerPreview(event.target.checked)}
+              />
+              Use organizer preview endpoint
+            </label>
+          </div>
+
+          {previewItems.map((item, idx) => (
+            <div className="preview-item-row" key={`preview-${idx}`}>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="Unit price"
+                value={item.unitPrice}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setPreviewItems((prev) => prev.map((row, rowIndex) => rowIndex === idx ? { ...row, unitPrice: value } : row))
+                }}
+              />
+              <input
+                type="number"
+                min="1"
+                step="1"
+                placeholder="Quantity"
+                value={item.quantity}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setPreviewItems((prev) => prev.map((row, rowIndex) => rowIndex === idx ? { ...row, quantity: value } : row))
+                }}
+              />
+              {previewItems.length > 1 ? (
+                <button
+                  type="button"
+                  className="tier-remove-btn"
+                  onClick={() => setPreviewItems((prev) => prev.filter((_, rowIndex) => rowIndex !== idx))}
+                >
+                  ✕
+                </button>
+              ) : null}
+            </div>
+          ))}
+
+          <div className="preview-actions">
+            <button type="button" className="add-tier-inline" onClick={() => setPreviewItems((prev) => [...prev, blankPreviewItem()])}>
+              + Add sample item
+            </button>
+            <button type="button" className="primary-btn" onClick={handlePreview} disabled={previewLoading}>
+              {previewLoading ? 'Calculating...' : 'Run Preview'}
+            </button>
+          </div>
+
+          {previewResult ? (
+            <div className="preview-result-wrap">
+              <div className="preview-result-grid">
+                <p>Subtotal: {previewResult.subtotal.toFixed(2)} {formData.currency}</p>
+                <p>Platform Fee: {previewResult.platformFee.toFixed(2)} {formData.currency}</p>
+                <p>Gross Total: {previewResult.grossTotal.toFixed(2)} {formData.currency}</p>
+                <p>Resolved Source: {previewResult.source}</p>
+              </div>
+
+              {Array.isArray(previewResult.breakdown) && previewResult.breakdown.length ? (
+                <div className="preview-breakdown-wrap">
+                  <table className="preview-breakdown-table">
+                    <thead>
+                      <tr>
+                        <th>Item</th>
+                        <th className="is-right">Unit Price</th>
+                        <th className="is-right">Qty</th>
+                        <th className="is-right">Line Total</th>
+                        <th>Applied Tier</th>
+                        <th className="is-right">Fee</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewResult.breakdown.map((row, index) => (
+                        <tr key={`preview-row-${index}`}>
+                          <td>#{index + 1}</td>
+                          <td className="is-right">{formatCurrency(row.unitPrice, formData.currency)}</td>
+                          <td className="is-right">{Number(row.quantity || 0)}</td>
+                          <td className="is-right">{formatCurrency(row.lineTotal, formData.currency)}</td>
+                          <td>{row.tierLabel || 'N/A'}</td>
+                          <td className="is-right">{formatCurrency(row.fee, formData.currency)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
         {formError ? <p className="error-text">{formError}</p> : null}
       </section>
 
       <div className="fee-sticky-actions">
-        <button type="button" className="secondary-btn" onClick={onCancel}>Cancel</button>
-        <button type="submit" className="primary-btn" disabled={loading}>
-          {loading ? 'Saving...' : mode === 'create' ? 'Create Policy' : 'Update Policy'}
-        </button>
+        <button type="button" className="secondary-btn" onClick={resetForm}>Reset</button>
+        <div className="sticky-right-actions">
+          <button type="button" className="secondary-btn" onClick={handleCancel}>Cancel</button>
+          <button type="submit" className="primary-btn" disabled={loading}>
+            {loading ? 'Saving...' : mode === 'create' ? 'Create Policy' : 'Update Policy'}
+          </button>
+        </div>
       </div>
     </form>
   )

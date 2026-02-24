@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiRequest } from '../lib/apiClient'
 
-const OPTIONS = ['USER', 'ORGANIZATION', 'EVENT']
+const OPTIONS = ['GLOBAL', 'USER', 'ORGANIZATION', 'EVENT']
 
 function formatScopeLabel(scope) {
   return scope.charAt(0) + scope.slice(1).toLowerCase()
@@ -16,6 +16,12 @@ function ScopeSelector({ value, onChange, selectedId, onSelectId, selectedLabel,
 
   useEffect(() => {
     if (readOnly) return
+    if (value === 'GLOBAL') {
+      setItems([])
+      setLoading(false)
+      setError('')
+      return
+    }
     loadItems(value)
   }, [value, readOnly])
 
@@ -36,6 +42,11 @@ function ScopeSelector({ value, onChange, selectedId, onSelectId, selectedLabel,
     setError('')
 
     try {
+      if (scopeType === 'GLOBAL') {
+        setItems([])
+        return
+      }
+
       const endpoint = scopeType === 'ORGANIZATION'
         ? '/api/fees/admin/organizations'
         : scopeType === 'EVENT'
@@ -102,51 +113,58 @@ function ScopeSelector({ value, onChange, selectedId, onSelectId, selectedLabel,
               {selectedId ? <small>ID: {selectedId}</small> : null}
             </div>
           ) : (
-            <div className="scope-search-wrap">
-              <input
-                id="scope-search"
-                type="text"
-                value={query}
-                placeholder={`Search ${formatScopeLabel(value)}...`}
-                onFocus={() => setOpen(true)}
-                onChange={(event) => {
-                  setQuery(event.target.value)
-                  setOpen(true)
-                }}
-                onBlur={() => {
-                  window.setTimeout(() => setOpen(false), 150)
-                }}
-              />
-              <button
-                type="button"
-                className="scope-toggle-btn"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => setOpen((prev) => !prev)}
-              >
-                ▾
-              </button>
+            value === 'GLOBAL' ? (
+              <div className="readonly-value">
+                <strong>Global policy</strong>
+                <small>No subject selection required.</small>
+              </div>
+            ) : (
+              <div className="scope-search-wrap">
+                <input
+                  id="scope-search"
+                  type="text"
+                  value={query}
+                  placeholder={`Search ${formatScopeLabel(value)}...`}
+                  onFocus={() => setOpen(true)}
+                  onChange={(event) => {
+                    setQuery(event.target.value)
+                    setOpen(true)
+                  }}
+                  onBlur={() => {
+                    window.setTimeout(() => setOpen(false), 150)
+                  }}
+                />
+                <button
+                  type="button"
+                  className="scope-toggle-btn"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => setOpen((prev) => !prev)}
+                >
+                  ▾
+                </button>
 
-              {open ? (
-                <div className="scope-options">
-                  {loading ? <p className="scope-meta">Loading...</p> : null}
-                  {error ? <p className="scope-meta error-text">{error}</p> : null}
-                  {!loading && !error && filtered.length === 0 ? <p className="scope-meta">No matches found</p> : null}
+                {open ? (
+                  <div className="scope-options">
+                    {loading ? <p className="scope-meta">Loading...</p> : null}
+                    {error ? <p className="scope-meta error-text">{error}</p> : null}
+                    {!loading && !error && filtered.length === 0 ? <p className="scope-meta">No matches found</p> : null}
 
-                  {!loading && !error && filtered.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={`scope-option-item ${selectedId === item.id ? 'active' : ''}`}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => handleSelect(item)}
-                    >
-                      <span>{getItemLabel(item)}</span>
-                      <small>ID: {item.id}</small>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
+                    {!loading && !error && filtered.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`scope-option-item ${selectedId === item.id ? 'active' : ''}`}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => handleSelect(item)}
+                      >
+                        <span>{getItemLabel(item)}</span>
+                        <small>ID: {item.id}</small>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            )
           )}
         </div>
       </div>

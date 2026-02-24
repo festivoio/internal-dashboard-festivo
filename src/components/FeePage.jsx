@@ -27,6 +27,19 @@ function FeePage() {
     EVENT: {}
   })
 
+  const [scopeFilter, setScopeFilter] = useState('ALL')
+  const [currencyFilter, setCurrencyFilter] = useState('ALL')
+  const [activeOnly, setActiveOnly] = useState(false)
+
+  const [effectiveFilters, setEffectiveFilters] = useState({
+    eventId: '',
+    organizationId: '',
+    userId: '',
+    currency: 'BDT'
+  })
+  const [effectiveLoading, setEffectiveLoading] = useState(false)
+  const [effectiveResult, setEffectiveResult] = useState(null)
+
   useEffect(() => {
     fetchPolicies()
   }, [])
@@ -94,7 +107,6 @@ function FeePage() {
   }
 
   const summary = useMemo(() => {
-    const now = new Date()
     const active = policies.filter((policy) => getPolicyStatus(policy) === 'ACTIVE').length
     const upcoming = policies.filter((policy) => getPolicyStatus(policy) === 'SCHEDULED').length
     const expired = policies.filter((policy) => {
@@ -102,18 +114,32 @@ function FeePage() {
       return status === 'EXPIRED' || status === 'INACTIVE'
     }).length
 
-    return { active, upcoming, expired, total: policies.length, now }
+    return { active, upcoming, expired }
   }, [policies])
 
-  const sortedPolicies = useMemo(() => {
+  const filteredPolicies = useMemo(() => {
+    let rows = [...policies]
+
+    if (scopeFilter !== 'ALL') {
+      rows = rows.filter((policy) => normalizeScope(policy.subjectType) === scopeFilter)
+    }
+
+    if (currencyFilter !== 'ALL') {
+      rows = rows.filter((policy) => formatCurrencyLabel(policy.currency) === currencyFilter)
+    }
+
+    if (activeOnly) {
+      rows = rows.filter((policy) => getPolicyStatus(policy) === 'ACTIVE')
+    }
+
     const resolvePolicyDate = (policy) => {
       const rawDate = policy.activeFrom || policy.activeTo || policy.createdAt || policy.updatedAt
       const time = rawDate ? new Date(rawDate).getTime() : 0
       return Number.isFinite(time) ? time : 0
     }
 
-    return [...policies].sort((a, b) => resolvePolicyDate(b) - resolvePolicyDate(a))
-  }, [policies])
+    return rows.sort((a, b) => resolvePolicyDate(b) - resolvePolicyDate(a))
+  }, [policies, scopeFilter, currencyFilter, activeOnly])
 
   const resolveSubjectLabel = (policy) => {
     const scope = normalizeScope(policy.subjectType)
@@ -168,11 +194,11 @@ function FeePage() {
     if (action === 'deactivate') {
       try {
         await apiRequest(`/api/fees/policies/${policy.id}`, {
-          method: 'PUT',
+          method: 'PATCH',
           body: {
             perTicket: Boolean(policy.perTicket),
             rounding: policy.rounding || 'ROUND',
-            rules: { tiers: policy.rules?.tiers || [] },
+            rules: policy.rules || { tiers: [] },
             isActive: false,
             activeFrom: policy.activeFrom ? new Date(policy.activeFrom) : null,
             activeTo: policy.activeTo ? new Date(policy.activeTo) : null
@@ -182,8 +208,53 @@ function FeePage() {
       } catch (requestError) {
         setError(`Error deactivating policy: ${requestError.message}`)
       }
+      return
+    }
+
+    if (action === 'activate') {
+      const confirmed = window.confirm('Activating this policy deactivates other active policies in same scope/currency. Continue?')
+      if (!confirmed) return
+
+      try {
+        await apiRequest(`/api/fees/policies/${policy.id}/activate`, {
+          method: 'POST',
+          body: {}
+        })
+        fetchPolicies()
+      } catch (requestError) {
+        setError(`Error activating policy: ${requestError.message}`)
+      }
     }
   }
+
+  const runEffectiveLookup = async () => {
+    try {
+      setEffectiveLoading(true)
+      const params = new URLSearchParams()
+
+      if (effectiveFilters.eventId) params.set('eventId', effectiveFilters.eventId)
+      if (effectiveFilters.organizationId) params.set('organizationId', effectiveFilters.organizationId)
+      if (effectiveFilters.userId) params.set('userId', effectiveFilters.userId)
+      if (effectiveFilters.currency) params.set('currency', effectiveFilters.currency)
+
+      const result = await apiRequest(`/api/fees/effective?${params.toString()}`, {
+        method: 'GET'
+      })
+
+      setEffectiveResult(result?.data || result)
+    } catch (lookupError) {
+      setError(`Effective lookup failed: ${lookupError.message}`)
+      setEffectiveResult(null)
+    } finally {
+      setEffectiveLoading(false)
+    }
+  }
+
+  const currencyOptions = useMemo(() => {
+    const set = new Set(['BDT'])
+    policies.forEach((policy) => set.add(formatCurrencyLabel(policy.currency)))
+    return Array.from(set)
+  }, [policies])
 
   return (
     <div className="events-page">
@@ -216,6 +287,26 @@ function FeePage() {
                 <PolicySummaryCard label="Expired Policies" value={summary.expired} />
               </section>
 
+              <section className="fee-form-card fee-filter-row">
+                <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)}>
+                  <option value="ALL">All scopes</option>
+                  <option value="GLOBAL">Global</option>
+                  <option value="ORGANIZATION">Organization</option>
+                  <option value="EVENT">Event</option>
+                  <option value="USER">User</option>
+                </select>
+                <select value={currencyFilter} onChange={(event) => setCurrencyFilter(event.target.value)}>
+                  <option value="ALL">All currencies</option>
+                  {currencyOptions.map((currency) => (
+                    <option key={currency} value={currency}>{currency}</option>
+                  ))}
+                </select>
+                <label className="fee-inline-check">
+                  <input type="checkbox" checked={activeOnly} onChange={(event) => setActiveOnly(event.target.checked)} />
+                  Active only
+                </label>
+              </section>
+
               <div className="fee-policy-table-wrap">
                 <table className="fee-policy-table">
                   <thead>
@@ -225,13 +316,15 @@ function FeePage() {
                       <th>Currency</th>
                       <th>Fee Structure</th>
                       <th>Status</th>
-                      <th>Active Period</th>
+                      <th>isActive</th>
+                      <th>Active From</th>
+                      <th>Active To</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
 
                   <tbody>
-                    {sortedPolicies.map((policy) => {
+                    {filteredPolicies.map((policy) => {
                       const status = getPolicyStatus(policy)
                       const tierPreview = buildTierPreview(policy.rules?.tiers || [])
                       const subjectLabel = resolveSubjectLabel(policy)
@@ -258,11 +351,9 @@ function FeePage() {
                           <td>
                             <PolicyStatusBadge status={status} />
                           </td>
-                          <td>
-                            {formatDateLabel(policy.activeFrom)}
-                            {' - '}
-                            {policy.activeTo ? formatDateLabel(policy.activeTo) : 'No end date'}
-                          </td>
+                          <td>{policy.isActive ? 'Yes' : 'No'}</td>
+                          <td>{formatDateLabel(policy.activeFrom)}</td>
+                          <td>{policy.activeTo ? formatDateLabel(policy.activeTo) : 'No end date'}</td>
                           <td>
                             <PolicyActionsDropdown policy={policy} onAction={handlePolicyAction} />
                           </td>
@@ -272,6 +363,42 @@ function FeePage() {
                   </tbody>
                 </table>
               </div>
+
+              <section className="fee-form-card effective-inspector">
+                <div className="fee-section-header">
+                  <h3>Effective Policy Inspector</h3>
+                </div>
+
+                <div className="effective-grid">
+                  <input
+                    placeholder="Event ID"
+                    value={effectiveFilters.eventId}
+                    onChange={(event) => setEffectiveFilters((prev) => ({ ...prev, eventId: event.target.value }))}
+                  />
+                  <input
+                    placeholder="Organization ID"
+                    value={effectiveFilters.organizationId}
+                    onChange={(event) => setEffectiveFilters((prev) => ({ ...prev, organizationId: event.target.value }))}
+                  />
+                  <input
+                    placeholder="User ID"
+                    value={effectiveFilters.userId}
+                    onChange={(event) => setEffectiveFilters((prev) => ({ ...prev, userId: event.target.value }))}
+                  />
+                  <input
+                    placeholder="Currency"
+                    value={effectiveFilters.currency}
+                    onChange={(event) => setEffectiveFilters((prev) => ({ ...prev, currency: event.target.value.toUpperCase() }))}
+                  />
+                  <button type="button" className="primary-btn" onClick={runEffectiveLookup} disabled={effectiveLoading}>
+                    {effectiveLoading ? 'Checking...' : 'Inspect Effective Policy'}
+                  </button>
+                </div>
+
+                {effectiveResult ? (
+                  <pre className="effective-result">{JSON.stringify(effectiveResult, null, 2)}</pre>
+                ) : null}
+              </section>
             </>
           )}
         </div>

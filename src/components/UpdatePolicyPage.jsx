@@ -54,11 +54,11 @@ function UpdatePolicyPage() {
 
     try {
       const result = await apiRequest(`/api/fees/policies/${id}`, {
-        method: 'PUT',
+        method: 'PATCH',
         body: {
           perTicket: payload.perTicket,
           rounding: payload.rounding,
-          rules: { tiers: payload.tiers },
+          rules: payload.rules,
           isActive: payload.isActive,
           activeFrom: payload.activeFrom ? new Date(payload.activeFrom) : null,
           activeTo: payload.activeTo ? new Date(payload.activeTo) : null

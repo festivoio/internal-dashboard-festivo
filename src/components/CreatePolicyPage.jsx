@@ -28,7 +28,7 @@ function CreateFeePolicyPage() {
           currency: payload.currency,
           perTicket: payload.perTicket,
           rounding: payload.rounding,
-          rules: { tiers: payload.tiers },
+          rules: payload.rules,
           isActive: payload.isActive,
           activeFrom: payload.activeFrom ? new Date(payload.activeFrom) : null,
           activeTo: payload.activeTo ? new Date(payload.activeTo) : null
@@ -76,7 +76,7 @@ function CreateFeePolicyPage() {
               isActive: true,
               activeFrom: new Date().toISOString().split('T')[0],
               activeTo: '',
-              tiers: [{ min: 0, max: null, pct: 0.03 }]
+              tiers: [{ min: 0, max: null, pct: 0.05 }]
             }}
             onSubmit={handleCreate}
             onCancel={() => navigate('/fee')}
